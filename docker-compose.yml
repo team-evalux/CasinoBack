@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: postgres-casino
+    environment:
+      POSTGRES_USER: casino_user
+      POSTGRES_PASSWORD: casino_pass
+      POSTGRES_DB: casino_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_casino_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  postgres_casino_data:
