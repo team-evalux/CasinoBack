@@ -22,8 +22,11 @@ public class UtilisateurService {
         String hash = passwordEncoder.encode(motDePassePlain);
         Utilisateur u = new Utilisateur(email, pseudo, hash);
         Utilisateur saved = utilisateurRepo.save(u);
-        // créer wallet initial avec 1000 crédits
-        Wallet w = new Wallet(saved, 1000L);
+        // créer wallet initial avec 1000 crédits (via builder Lombok)
+        Wallet w = Wallet.builder()
+                .utilisateur(saved)
+                .solde(1000L)
+                .build();
         walletRepo.save(w);
         return saved;
     }

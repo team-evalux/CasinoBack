@@ -1,9 +1,15 @@
 package org.example.model;
 
 import jakarta.persistence.*;
+import lombok.*;
 
 @Entity
 @Table(name = "wallet")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class Wallet {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -16,15 +22,6 @@ public class Wallet {
     @Column(nullable = false)
     private Long solde = 0L; // crédits en entier
 
-    public Wallet() {}
-    public Wallet(Utilisateur utilisateur, Long solde) {
-        this.utilisateur = utilisateur;
-        this.solde = solde;
-    }
-    // getters / setters
-    public Long getId(){return id;}
-    public Utilisateur getUtilisateur(){return utilisateur;}
-    public void setUtilisateur(Utilisateur u){this.utilisateur=u;}
-    public Long getSolde(){return solde;}
-    public void setSolde(Long s){this.solde=s;}
+    @Version
+    private Integer version;
 }
