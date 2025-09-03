@@ -9,6 +9,7 @@ import org.example.service.CoinFlipService;
 import org.example.service.WalletService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -86,12 +87,9 @@ public class PilefaceController {
      * SET bias (adminKey requis pour limiter l'accès)
      * Body: { "probPile": 0.6, "adminKey": "xxxx" }
      */
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/coinflip/bias")
     public ResponseEntity<?> setBias(@RequestBody Map<String, Object> body) {
-        Object key = body.get("adminKey");
-        if (!(key instanceof String) || !key.equals(adminKey)) {
-            return ResponseEntity.status(403).body(Map.of("error", "Admin key invalide"));
-        }
         Object p = body.get("probPile");
         if (!(p instanceof Number)) {
             return ResponseEntity.badRequest().body(Map.of("error", "probPile manquant ou invalide"));

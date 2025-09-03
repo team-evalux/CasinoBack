@@ -25,7 +25,7 @@ public class AuthController {
         }
         Utilisateur u = utilisateurService.inscrire(req.email, req.pseudo, req.motDePasse);
         String token = jwtUtil.genererToken(u.getEmail());
-        return ResponseEntity.ok(new AuthResponse(token, u.getEmail(), u.getPseudo()));
+        return ResponseEntity.ok(new AuthResponse(token, u.getEmail(), u.getPseudo(), u.getRole()));
     }
 
     @PostMapping("/login")
@@ -35,6 +35,6 @@ public class AuthController {
             return ResponseEntity.status(401).body("Identifiants invalides");
         }
         String token = jwtUtil.genererToken(u.getEmail());
-        return ResponseEntity.ok(new AuthResponse(token, u.getEmail(), u.getPseudo()));
+        return ResponseEntity.ok(new AuthResponse(token, u.getEmail(), u.getPseudo(), u.getRole()));
     }
 }
