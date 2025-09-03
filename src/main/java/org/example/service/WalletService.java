@@ -12,26 +12,39 @@ public class WalletService {
     @Autowired
     private WalletRepository walletRepo;
 
+    @Autowired
+    private WalletSseService walletSseService;
+
     public Wallet getWalletParUtilisateur(Utilisateur u){
         return walletRepo.findByUtilisateur(u).orElseGet(() -> {
-            Wallet w = new Wallet(u, 0L);
+            Wallet w = Wallet.builder()
+                    .utilisateur(u)
+                    .solde(0L)
+                    .build();
             return walletRepo.save(w);
         });
     }
 
     @Transactional
     public Wallet crediter(Utilisateur u, long montant){
-        Wallet w = getWalletParUtilisateur(u);
-        w.setSolde(w.getSolde() + montant);
-        return walletRepo.save(w);
+        // ensure wallet exists
+        getWalletParUtilisateur(u);
+        int updated = walletRepo.incrementSolde(u, montant);
+        Wallet w = walletRepo.findByUtilisateur(u).orElseThrow();
+        // notifier via SSE
+        walletSseService.sendBalanceUpdate(u.getEmail(), w.getSolde());
+        return w;
     }
 
     @Transactional
     public Wallet debiter(Utilisateur u, long montant){
-        Wallet w = getWalletParUtilisateur(u);
-        long nouveau = w.getSolde() - montant;
-        if(nouveau < 0) throw new IllegalArgumentException("Solde insuffisant");
-        w.setSolde(nouveau);
-        return walletRepo.save(w);
+        // ensure wallet exists
+        getWalletParUtilisateur(u);
+        int updated = walletRepo.decrementSoldeIfEnough(u, montant);
+        if(updated == 0) throw new IllegalArgumentException("Solde insuffisant");
+        Wallet w = walletRepo.findByUtilisateur(u).orElseThrow();
+        // notifier via SSE
+        walletSseService.sendBalanceUpdate(u.getEmail(), w.getSolde());
+        return w;
     }
 }
