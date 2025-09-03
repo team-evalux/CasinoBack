@@ -15,10 +15,11 @@ public class UserDetailsServiceImpl implements UserDetailsService {
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         Utilisateur u = utilisateurRepo.findByEmail(username)
                 .orElseThrow(() -> new UsernameNotFoundException("Utilisateur non trouvé"));
+
+        String role = (u.getRole() != null && !u.getRole().isBlank()) ? u.getRole() : "USER";
         return User.withUsername(u.getEmail())
                 .password(u.getMotDePasseHash())
-                .roles("USER")
+                .roles(role) // Spring ajoutera "ROLE_" en interview
                 .build();
     }
 }
-
