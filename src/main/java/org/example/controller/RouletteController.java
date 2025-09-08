@@ -9,6 +9,7 @@ import org.example.service.RouletteService;
 import org.example.service.WalletService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -25,6 +26,30 @@ public class RouletteController {
     @Autowired
     private RouletteService rouletteService;
 
+    // ---------- ADMIN ----------
+    @PostMapping("/roulette/probabilities")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<?> setProbabilities(@RequestBody Map<Integer, Integer> weights) {
+        rouletteService.setCustomWeights(weights);
+        return ResponseEntity.ok(Map.of("success", true, "weights", rouletteService.getCustomWeights()));
+    }
+
+    @GetMapping("/roulette/probabilities")
+    @PreAuthorize("hasRole('ADMIN')")
+
+    public ResponseEntity<?> getProbabilities() {
+        Map<Integer, Integer> w = rouletteService.getCustomWeights();
+        if (w == null) return ResponseEntity.ok(Map.of("weights", null));
+        return ResponseEntity.ok(Map.of("weights", w));
+    }
+
+    @DeleteMapping("/roulette/probabilities")
+    public ResponseEntity<?> resetProbabilities() {
+        rouletteService.resetWeights();
+        return ResponseEntity.ok(Map.of("success", true, "message", "Probabilités réinitialisées"));
+    }
+
+    // ---------- JOUEUR ----------
     @PostMapping("/roulette")
     public ResponseEntity<?> jouerRoulette(@RequestBody RouletteBetRequest req, Authentication authentication) {
         if (req == null || req.betType == null || req.betValue == null) {
@@ -35,23 +60,23 @@ public class RouletteController {
         String email = authentication.getName();
         Utilisateur u = utilisateurRepo.findByEmail(email).orElseThrow();
 
-        // 1) débiter la mise
+        // débiter la mise
         try {
             walletService.debiter(u, req.montant);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", "Solde insuffisant"));
         }
 
-        // 2) tirer numéro
+        // tirer numéro (utilise customWeights si définies)
         int result = rouletteService.tirerNumero();
         String color = rouletteService.couleurPour(result);
 
-        // 3) test gagnant
+        // test gagnant
         boolean win = rouletteService.estGagnant(req.betType, req.betValue, result);
         long montantGagne = 0L;
         if (win) {
             long mult = rouletteService.payoutMultiplier(req.betType);
-            montantGagne = req.montant * mult; // retour total
+            montantGagne = req.montant * mult; // montant crédité
             walletService.crediter(u, montantGagne);
         }
 
