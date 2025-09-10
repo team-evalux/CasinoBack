@@ -1,8 +1,13 @@
+// src/main/java/org/example/service/RouletteService.java
 package org.example.service;
 
-import org.example.dto.RouletteBetRequest;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.example.model.RouletteConfig;
+import org.example.repo.RouletteConfigRepository;
 import org.springframework.stereotype.Service;
 
+import jakarta.annotation.PostConstruct;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -10,33 +15,65 @@ import java.util.concurrent.ConcurrentHashMap;
 public class RouletteService {
 
     private final Random rand = new Random();
-
-    // poids personnalisés : numéro -> poids (entier >= 0)
-    // si null ou vide => tirage équitable
     private Map<Integer, Integer> customWeights = null;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final RouletteConfigRepository repo;
 
-    // ensemble des numéros rouges
     private static final Set<Integer> RED_SET = Set.of(
             1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36
     );
 
-    // ---------- ADMIN ----------
+    public RouletteService(RouletteConfigRepository repo) {
+        this.repo = repo;
+    }
+
+    @PostConstruct
+    public void initFromDb() {
+        List<RouletteConfig> all = repo.findAll();
+        if (all.isEmpty()) {
+            // default: null => uniform
+            repo.save(new RouletteConfig(null));
+            this.customWeights = null;
+        } else {
+            String json = all.get(0).getWeightsJson();
+            if (json == null) {
+                this.customWeights = null;
+            } else {
+                try {
+                    Map<String,Integer> tmp = objectMapper.readValue(json, new TypeReference<>(){});
+                    Map<Integer,Integer> converted = new ConcurrentHashMap<>();
+                    for (Map.Entry<String,Integer> e : tmp.entrySet()) {
+                        converted.put(Integer.valueOf(e.getKey()), e.getValue());
+                    }
+                    this.customWeights = converted;
+                } catch (Exception ex) {
+                    this.customWeights = null;
+                }
+            }
+        }
+    }
+
     public synchronized void setCustomWeights(Map<Integer, Integer> weights) {
         if (weights == null || weights.isEmpty()) {
             this.customWeights = null;
+            persistWeightsJson(null);
             return;
         }
-        // sanitize: only keep keys 0..36 and non-negative integer weights
         Map<Integer, Integer> cleaned = new ConcurrentHashMap<>();
         for (Map.Entry<Integer, Integer> e : weights.entrySet()) {
             Integer k = e.getKey();
             Integer v = e.getValue();
             if (k == null || v == null) continue;
             if (k < 0 || k > 36) continue;
-            if (v <= 0) continue; // ignore zero or negative -> treated as not allowed
+            if (v <= 0) continue;
             cleaned.put(k, v);
         }
         this.customWeights = cleaned.isEmpty() ? null : cleaned;
+        try {
+            persistWeightsJson(this.customWeights == null ? null : objectMapper.writeValueAsString(this.customWeights));
+        } catch (Exception ex) {
+            // ignore persist error (log si tu veux)
+        }
     }
 
     public synchronized Map<Integer, Integer> getCustomWeights() {
@@ -45,16 +82,25 @@ public class RouletteService {
 
     public synchronized void resetWeights() {
         this.customWeights = null;
+        persistWeightsJson(null);
     }
 
+    private void persistWeightsJson(String json) {
+        List<RouletteConfig> all = repo.findAll();
+        RouletteConfig cfg;
+        if (all.isEmpty()) {
+            cfg = new RouletteConfig(json);
+        } else {
+            cfg = all.get(0);
+            cfg.setWeightsJson(json);
+        }
+        repo.save(cfg);
+    }
 
-
-
-
-    // ---------- TIRAGE ----------
+    // ----- tirage idem que avant -----
     public int tirerNumero() {
         if (customWeights == null || customWeights.isEmpty()) {
-            return rand.nextInt(37); // 0..36 uniform
+            return rand.nextInt(37);
         }
         return weightedRandom(customWeights);
     }
@@ -67,7 +113,6 @@ public class RouletteService {
             r -= e.getValue();
             if (r < 0) return e.getKey();
         }
-        // fallback (shouldn't happen)
         return rand.nextInt(37);
     }
 
@@ -76,22 +121,15 @@ public class RouletteService {
         return RED_SET.contains(numero) ? "red" : "black";
     }
 
-    /**
-     * Vérifie si un pari est gagnant
-     * betType : "straight", "color", "parity", "range", "dozen"
-     * betValue : depends on type (string)
-     */
+    // reste de tes méthodes (estGagnant, payoutMultiplier) inchangées
     public boolean estGagnant(String betType, String betValue, int numero) {
+        // ... copie ta logique existante ...
         if (betType == null || betValue == null) return false;
         switch (betType) {
             case "straight":
-                try {
-                    int n = Integer.parseInt(betValue);
-                    return n == numero;
-                } catch (NumberFormatException ex) { return false; }
+                try { return Integer.parseInt(betValue) == numero; } catch (Exception e) { return false;}
             case "color":
-                String color = couleurPour(numero);
-                return betValue.equalsIgnoreCase(color);
+                return betValue.equalsIgnoreCase(couleurPour(numero));
             case "parity":
                 if (numero == 0) return false;
                 if ("even".equalsIgnoreCase(betValue)) return numero % 2 == 0;
@@ -111,12 +149,6 @@ public class RouletteService {
         }
     }
 
-    /**
-     * Multiplicateur (utilisé pour calculer montantGagne = mise * mult)
-     * - straight : 35 (payout 35x)
-     * - color / parity / range : 2
-     * - dozen : 3
-     */
     public long payoutMultiplier(String betType) {
         if (betType == null) return 0L;
         switch (betType) {
