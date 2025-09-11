@@ -1,3 +1,4 @@
+// src/main/java/org/example/controller/PilefaceController.java
 package org.example.controller;
 
 import org.example.dto.CoinFlipRequest;
@@ -6,6 +7,7 @@ import org.example.model.Utilisateur;
 import org.example.model.Wallet;
 import org.example.repo.UtilisateurRepository;
 import org.example.service.CoinFlipService;
+import org.example.service.GameHistoryService;
 import org.example.service.WalletService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -24,20 +26,20 @@ public class PilefaceController {
     private final CoinFlipService coinFlipService;
     private final String adminKey;
 
+    private final GameHistoryService historyService;
+
     public PilefaceController(WalletService walletService,
-                          UtilisateurRepository utilisateurRepo,
-                          CoinFlipService coinFlipService,
-                          @Value("${app.admin.key:changeme}") String adminKey) {
+                              UtilisateurRepository utilisateurRepo,
+                              CoinFlipService coinFlipService,
+                              GameHistoryService historyService,
+                              @Value("${app.admin.key:changeme}") String adminKey) {
         this.walletService = walletService;
         this.utilisateurRepo = utilisateurRepo;
         this.coinFlipService = coinFlipService;
+        this.historyService = historyService;
         this.adminKey = adminKey;
     }
 
-    /**
-     * Endpoint principal : joue une partie pile ou face.
-     * Body: { "choix": "pile"|"face", "montant": 100 }
-     */
     @PostMapping("/coinflip")
     public ResponseEntity<?> jouerCoinFlip(@RequestBody CoinFlipRequest req, Authentication authentication) {
         if (req == null || req.choix == null || (!req.choix.equals("pile") && !req.choix.equals("face"))) {
@@ -50,43 +52,34 @@ public class PilefaceController {
         String email = authentication.getName();
         Utilisateur u = utilisateurRepo.findByEmail(email).orElseThrow();
 
-        // débiter d'abord la mise (lance IllegalArgumentException si solde insuffisant)
         try {
             walletService.debiter(u, req.montant);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", "Solde insuffisant"));
         }
 
-        // tirer l'issue (pile/face) suivant la probabilité configurée
         String outcome = coinFlipService.tirer();
         boolean win = outcome.equals(req.choix);
 
         long montantGagne = 0L;
         if (win) {
-            // payout = 2 * mise (comme demandé)
             montantGagne = req.montant * 2L;
             walletService.crediter(u, montantGagne);
         }
 
-        // récupère l'état courant du wallet pour renvoyer solde
+        historyService.record(u, "coinflip", "choice=" + req.choix + ",outcome=" + outcome, req.montant, montantGagne, win ? 2 : 0);
+
         Wallet w = walletService.getWalletParUtilisateur(u);
 
         CoinFlipResponse resp = new CoinFlipResponse(outcome, win, req.montant, montantGagne, w.getSolde());
         return ResponseEntity.ok(resp);
     }
 
-    /**
-     * GET current bias (probabilité de pile)
-     */
     @GetMapping("/coinflip/bias")
     public ResponseEntity<?> getBias() {
         return ResponseEntity.ok(Map.of("probPile", coinFlipService.getProbPile()));
     }
 
-    /**
-     * SET bias (adminKey requis pour limiter l'accès)
-     * Body: { "probPile": 0.6, "adminKey": "xxxx" }
-     */
     @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/coinflip/bias")
     public ResponseEntity<?> setBias(@RequestBody Map<String, Object> body) {

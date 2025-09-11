@@ -1,3 +1,4 @@
+// src/main/java/org/example/controller/SlotController.java
 package org.example.controller;
 
 import org.example.dto.SlotConfigRequest;
@@ -9,6 +10,7 @@ import org.example.model.Wallet;
 import org.example.repo.UtilisateurRepository;
 import org.example.service.SlotService;
 import org.example.service.WalletService;
+import org.example.service.GameHistoryService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -29,6 +31,8 @@ public class SlotController {
     private UtilisateurRepository utilisateurRepo;
     @Autowired
     private SlotService slotService;
+    @Autowired
+    private GameHistoryService historyService;
 
     @PostMapping("/play")
     @Transactional
@@ -49,6 +53,11 @@ public class SlotController {
         long payout = slotService.computePayout(reels, req.montant);
         boolean win = payout > 0L;
         if (win) walletService.crediter(u, payout);
+
+        Integer mult = 0;
+        if (payout > 0 && req.montant > 0) mult = (int)(payout / req.montant);
+
+        historyService.record(u, "slots", String.join(",", reels), req.montant, payout, mult);
 
         Wallet w = walletService.getWalletParUtilisateur(u);
         SlotPlayResponse resp = new SlotPlayResponse(reels, req.montant, payout, win, w.getSolde());
@@ -73,7 +82,6 @@ public class SlotController {
         if (req.symbols == null || req.symbols.isEmpty()) return ResponseEntity.badRequest().body(Map.of("error", "symbols manquant"));
         int reelsCount = (req.reelsCount != null && req.reelsCount > 0) ? req.reelsCount : slotService.getReelsCount();
 
-        // apply update: symbols, weights, reelsCount, payouts (if présent)
         slotService.updateConfig(req.symbols, req.reelWeights, reelsCount, req.payouts);
 
         SlotConfigResponse resp = new SlotConfigResponse(
