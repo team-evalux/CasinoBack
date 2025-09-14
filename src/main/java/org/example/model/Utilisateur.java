@@ -2,6 +2,7 @@ package org.example.model;
 
 import jakarta.persistence.*;
 import lombok.*;
+import java.time.Instant;
 import java.time.LocalDateTime;
 
 @Entity
@@ -28,6 +29,8 @@ public class Utilisateur {
     private LocalDateTime dateCreation = LocalDateTime.now();
 
     private boolean active = true;
+
+    private Instant lastBonusClaim;
 
     // rôle : "USER" ou "ADMIN"
     @Column(nullable = false)
