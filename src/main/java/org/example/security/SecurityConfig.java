@@ -2,6 +2,7 @@ package org.example.security;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.*;
+import org.springframework.http.HttpMethod; // <— ajoute ça
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -16,9 +17,6 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.List;
 
-/**
- * Configuration de sécurité (version correcte pour servlet / non-reactive).
- */
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {
@@ -38,36 +36,38 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http.csrf(csrf -> csrf.disable());
-
-        // activer CORS et fournir la source de configuration
         http.cors(cors -> cors.configurationSource(corsConfigurationSource()));
-
         http.sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
 
         http.authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/auth/*", "/h2-console/*").permitAll()
+                // préflight navigateur
+                .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+
+                // public
+                .requestMatchers("/api/auth/**", "/h2-console/**", "/ws/**").permitAll()
+
+                // endpoints bonus (auth requis)
                 .requestMatchers("/api/bonus/**").authenticated()
+
+                // blackjack (auth requis ; tu peux mettre hasAnyRole("USER","ADMIN") si tu préfères)
+                .requestMatchers("/api/bj/**").authenticated()
+
+                // le reste
                 .anyRequest().authenticated()
         );
 
         http.headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()));
         http.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
-
         return http.build();
     }
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-
-        // Pour le développement : autoriser ton front Angular (localhost:4200)
         config.setAllowCredentials(true);
         config.setAllowedOrigins(List.of("http://localhost:4200"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-
-        // si tu veux autoriser tout (attention en prod) :
-        // config.setAllowedOrigins(List.of("*"));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
