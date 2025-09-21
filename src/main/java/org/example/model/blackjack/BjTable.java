@@ -1,7 +1,9 @@
+// src/main/java/org/example/model/blackjack/BjTable.java
 package org.example.model.blackjack;
 
 import lombok.Data;
 
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -24,7 +26,11 @@ public class BjTable {
 
     // jeu courant
     private Integer currentSeatIndex = null;
-    private long phaseDeadlineEpochMs = 0L;
+    private Long phaseDeadlineEpochMs = 0L;
+
+    // nouveau : qui a créé la table (peut être null)
+    private String creatorEmail;
+    private Instant createdAt = Instant.now();
 
     public BjTable(int maxSeats, boolean isPrivate, String code) {
         this.maxSeats = maxSeats;

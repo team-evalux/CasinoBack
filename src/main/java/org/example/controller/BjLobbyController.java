@@ -1,3 +1,4 @@
+// src/main/java/org/example/controller/BjLobbyController.java
 package org.example.controller;
 
 import lombok.Data;
@@ -5,10 +6,11 @@ import lombok.RequiredArgsConstructor;
 import org.example.model.blackjack.BjTable;
 import org.example.service.BjTableService;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.security.Principal;
 import java.util.*;
+
 @RestController
 @RequestMapping("/api/bj")
 @RequiredArgsConstructor
@@ -20,7 +22,6 @@ public class BjLobbyController {
     public ResponseEntity<?> list() {
         List<Map<String,Object>> out = new ArrayList<>();
         for (BjTable t : service.listPublicTables()) {
-            // Map.of(...) n'accepte pas de null → utilisons une HashMap/LinkedHashMap
             Map<String,Object> row = new LinkedHashMap<>();
             row.put("id",        t.getId());
             row.put("maxSeats",  t.getMaxSeats());
@@ -31,10 +32,11 @@ public class BjLobbyController {
         return ResponseEntity.ok(out);
     }
 
-    // src/main/java/org/example/controller/BjLobbyController.java (méthode create)
     @PostMapping("/table")
-    public ResponseEntity<?> create(@RequestBody CreateReq req) {
-        BjTable t = service.createTable(Boolean.TRUE.equals(req.privateTable),
+    public ResponseEntity<?> create(@RequestBody CreateReq req, Principal principal) {
+        String creator = principal != null ? principal.getName() : null;
+        BjTable t = service.createTable(creator,
+                Boolean.TRUE.equals(req.privateTable),
                 req.code, req.maxSeats != null ? req.maxSeats : 5);
 
         Map<String,Object> out = new java.util.HashMap<>();
@@ -44,11 +46,17 @@ public class BjLobbyController {
         return ResponseEntity.ok(out);
     }
 
+    @DeleteMapping("/table/{id}")
+    public ResponseEntity<?> close(@PathVariable Long id, Principal principal) {
+        if (principal == null) return ResponseEntity.status(401).body("Non authentifié");
+        service.closeTable(id, principal.getName());
+        return ResponseEntity.ok(Map.of("ok", true));
+    }
 
     @Data
     public static class CreateReq {
         private Boolean privateTable;
         private Integer maxSeats;
-        private String  code; // optionnel
+        private String  code;
     }
 }

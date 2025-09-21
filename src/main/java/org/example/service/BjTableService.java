@@ -1,3 +1,4 @@
+// src/main/java/org/example/service/BjTableService.java
 package org.example.service;
 
 import lombok.RequiredArgsConstructor;
@@ -21,16 +22,25 @@ public class BjTableService {
     private final SimpMessagingTemplate broker;
 
     private final Map<Long, BjTable> tables = new ConcurrentHashMap<>();
-    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(3);
 
+    // mapping email -> tableId (un utilisateur assis sur au plus une table)
+    private final Map<String, Long> userTable = new ConcurrentHashMap<>();
+
+    // timers pour nettoyage après déconnexion (email -> scheduledFuture)
+    private final Map<String, ScheduledFuture<?>> disconnectTimers = new ConcurrentHashMap<>();
+
+    // paramètres
     // paramètres
     private static final long BETTING_MS = 10_000;
     private static final long TURN_MS    = 20_000;
+    private static final long RESULT_MS = 10_000; // <-- affiche les résultats pendant 10s
+    private static final long DISCONNECT_GRACE_MS = 120_000; // 2 minutes de grâce
+
 
     // ------------------------------------------------------------------------
     // Helpers
 
-    /** Map builder qui autorise les valeurs nulles (contrairement à Map.of). */
     private Map<String, Object> m(Object... kv) {
         Map<String, Object> out = new LinkedHashMap<>();
         for (int i = 0; i < kv.length - 1; i += 2) {
@@ -49,17 +59,17 @@ public class BjTableService {
     private void broadcastState(BjTable t) {
         broadcast(t, "TABLE_STATE", m(
                 "tableId",          t.getId(),
-                "phase",            t.getPhase(),                // peut être null au tout début → OK
-                "deadline",         t.getPhaseDeadlineEpochMs(), // peut être null → OK
+                "phase",            t.getPhase(),
+                "deadline",         t.getPhaseDeadlineEpochMs(),
                 "seats",            t.getSeats(),
                 "dealer",           t.getDealer(),
-                "currentSeatIndex", t.getCurrentSeatIndex(),     // peut être null → OK
+                "currentSeatIndex", t.getCurrentSeatIndex(),
                 "isPrivate",        t.isPrivate(),
-                "code",             t.getCode()                  // peut être null si publique → OK
+                "code",             t.getCode(),
+                "creatorEmail",     t.getCreatorEmail()
         ));
     }
 
-    /** Envoie la liste des tables publiques au lobby (si tu l’utilises côté front). */
     private void broadcastLobby() {
         List<Map<String, Object>> list = new ArrayList<>();
         for (BjTable t : listPublicTables()) {
@@ -96,18 +106,64 @@ public class BjTableService {
         return null;
     }
 
+    private void cancelDisconnectTimer(String email) {
+        ScheduledFuture<?> f = disconnectTimers.remove(email);
+        if (f != null) f.cancel(false);
+    }
+
+    private void scheduleDisconnectCleanup(BjTable t, int seatIndex, String email) {
+        cancelDisconnectTimer(email);
+        ScheduledFuture<?> future = scheduler.schedule(() -> {
+            synchronized (BjTableService.this) {
+                Seat s = t.getSeats().get(seatIndex);
+                if (s == null) return;
+                if (!Objects.equals(s.getEmail(), email)) return;
+                if (s.getStatus() != SeatStatus.DISCONNECTED) return;
+
+                // Ne supprimer le siège que si la table est dans un état sûr (pas mid-hand)
+                if (t.getPhase() == TablePhase.WAITING_FOR_PLAYERS || t.getPhase() == TablePhase.PAYOUT) {
+                    t.getSeats().put(seatIndex, new Seat());
+                    userTable.remove(email);
+                    disconnectTimers.remove(email);
+                    broadcastState(t);
+                    broadcastLobby();
+                } else {
+                    // si on est en pleine main, on laisse la place et on ne supprime pas tout de suite
+                    // l'utilisateur restera DISCONNECTED ; on évite une suppression qui complexifierait la logique
+                    disconnectTimers.remove(email);
+                }
+            }
+        }, DISCONNECT_GRACE_MS, TimeUnit.MILLISECONDS);
+        disconnectTimers.put(email, future);
+    }
+
     // ------------------------------------------------------------------------
     // PUBLIC API
 
-    public synchronized BjTable createTable(boolean isPrivate, String code, int maxSeats) {
+    /**
+     * Crée une table et, si creatorEmail != null, assied automatiquement le créateur au siège 0.
+     */
+    public synchronized BjTable createTable(String creatorEmail, boolean isPrivate, String code, int maxSeats) {
         BjTable t = new BjTable(Math.max(2, Math.min(7, maxSeats)), isPrivate, code);
-        // s’assure qu’on a un état initial non incohérent
         t.setPhase(TablePhase.WAITING_FOR_PLAYERS);
-        t.setPhaseDeadlineEpochMs(5);
+        t.setPhaseDeadlineEpochMs(5L);
         t.setCurrentSeatIndex(null);
+        t.setCreatorEmail(creatorEmail);
+        t.setCreatedAt(Instant.now());
 
         tables.put(t.getId(), t);
-        // broadcast table + lobby
+
+        // si on a un créateur (endpoint sécurisé), on l'assoit automatiquement au siège 0
+        if (creatorEmail != null) {
+            utilisateurRepo.findByEmail(creatorEmail).ifPresent(u -> {
+                Seat seat0 = t.getSeats().get(0);
+                seat0.setUserId(u.getId());
+                seat0.setEmail(creatorEmail);
+                seat0.setStatus(SeatStatus.SEATED);
+                userTable.put(creatorEmail, t.getId());
+            });
+        }
+
         broadcastState(t);
         broadcastLobby();
         return t;
@@ -125,33 +181,46 @@ public class BjTableService {
 
     public synchronized BjTable joinOrCreate(String email, JoinOrCreateMsg msg) {
         if (Boolean.TRUE.equals(msg.isCreatePublic())) {
-            return createTable(false, null, msg.getMaxSeats() != null ? msg.getMaxSeats() : 5);
+            return createTable(email, false, null, msg.getMaxSeats() != null ? msg.getMaxSeats() : 5);
         }
         if (Boolean.TRUE.equals(msg.isCreatePrivate())) {
             String c = (msg.getCode() != null && !msg.getCode().isBlank())
                     ? msg.getCode()
                     : UUID.randomUUID().toString().substring(0, 6);
-            return createTable(true, c, msg.getMaxSeats() != null ? msg.getMaxSeats() : 5);
+            return createTable(email, true, c, msg.getMaxSeats() != null ? msg.getMaxSeats() : 5);
         }
         if (msg.getTableId() != null) {
             return mustTable(msg.getTableId());
         }
-        // auto: rejoindre première publique ou créer
         return listPublicTables().stream().findFirst()
-                .orElseGet(() -> createTable(false, null, 5));
+                .orElseGet(() -> createTable(email, false, null, 5));
     }
 
     public synchronized void sit(String email, Long tableId, int seatIndex) {
+        // protection : un utilisateur ne peut être assis que sur une table
+        Long already = userTable.get(email);
+        if (already != null && !already.equals(tableId)) {
+            throw new IllegalStateException("Tu es déjà assis sur une autre table");
+        }
+
         BjTable t = mustTable(tableId);
         Seat seat = t.getSeats().get(seatIndex);
         if (seat == null) throw new IllegalArgumentException("Seat invalide");
         if (seat.getStatus() != SeatStatus.EMPTY && !Objects.equals(seat.getEmail(), email))
             throw new IllegalStateException("Seat occupé");
 
+        // règle : sur une table publique on n'autorise pas de nouveaux joueurs en plein milieu d'une main
+        if (!t.isPrivate() && (t.getPhase() == TablePhase.PLAYING || t.getPhase() == TablePhase.DEALER_TURN)) {
+            throw new IllegalStateException("Impossible de rejoindre une table publique en cours de main. Attends la prochaine main.");
+        }
+
         Utilisateur u = utilisateurRepo.findByEmail(email).orElseThrow();
         seat.setUserId(u.getId());
         seat.setEmail(email);
         seat.setStatus(SeatStatus.SEATED);
+        userTable.put(email, t.getId());
+        cancelDisconnectTimer(email);
+
         if (t.getPhase() == TablePhase.WAITING_FOR_PLAYERS) {
             goBetting(t);
         } else {
@@ -166,7 +235,6 @@ public class BjTableService {
             throw new IllegalStateException("Hors phase BETTING");
         }
 
-        // seatIndex: utilise celui du message, sinon retrouve par email
         Integer idx = msg.getSeatIndex();
         if (idx == null) {
             idx = findSeatIndexByEmail(t, email);
@@ -182,6 +250,7 @@ public class BjTableService {
 
         seat.getHand().setBet(amount);
 
+        // On ne débite qu'au moment du lockBetsAndDeal
         broadcast(t, "BET_UPDATE", Map.of(
                 "seat", idx,
                 "bet", amount
@@ -198,7 +267,6 @@ public class BjTableService {
         return null;
     }
 
-
     public synchronized void action(String email, ActionMsg msg) {
         BjTable t = mustTable(msg.getTableId());
         if (t.getPhase() != TablePhase.PLAYING) throw new IllegalStateException("Hors phase PLAYING");
@@ -212,7 +280,7 @@ public class BjTableService {
                 seat.getHand().add(t.getShoe().draw());
                 broadcast(t, "ACTION_RESULT", m("seat", msg.getSeatIndex(), "action", "HIT", "hand", seat.getHand()));
                 if (seat.getHand().isBusted()) nextTurnOrDealer(t);
-                else scheduleTurnTimeout(t); // redémarre deadline
+                else scheduleTurnTimeout(t);
             }
             case STAND -> {
                 seat.getHand().setStanding(true);
@@ -242,10 +310,14 @@ public class BjTableService {
         if (seatIndex != null) {
             Seat seat = t.getSeats().get(seatIndex);
             if (seat != null && Objects.equals(seat.getEmail(), email)) {
+                // si on est en cours de main on marque DISCONNECTED, sinon on libère le siège
                 if (t.getPhase() == TablePhase.PLAYING || t.getPhase() == TablePhase.DEALER_TURN) {
                     seat.setStatus(SeatStatus.DISCONNECTED);
+                    scheduleDisconnectCleanup(t, seatIndex, email);
                 } else {
                     t.getSeats().put(seatIndex, new Seat());
+                    userTable.remove(email);
+                    cancelDisconnectTimer(email);
                 }
             }
         }
@@ -258,6 +330,7 @@ public class BjTableService {
             table.getSeats().forEach((i, s) -> {
                 if (email.equals(s.getEmail()) && s.getStatus() == SeatStatus.SEATED) {
                     s.setStatus(SeatStatus.DISCONNECTED);
+                    scheduleDisconnectCleanup(table, i, email);
                 }
             });
             broadcastState(table);
@@ -266,6 +339,8 @@ public class BjTableService {
     }
 
     public synchronized void markReconnected(String email) {
+        // annule timer si existant et réassied si possible
+        cancelDisconnectTimer(email);
         tables.values().forEach(table -> {
             table.getSeats().forEach((i, s) -> {
                 if (email.equals(s.getEmail()) && s.getStatus() == SeatStatus.DISCONNECTED) {
@@ -278,7 +353,7 @@ public class BjTableService {
     }
 
     // ------------------------------------------------------------------------
-    // LOGIQUE DE PHASES
+    // LOGIQUE DE PHASES (inchangée sauf usage des nouvelles structures)
 
     private void goBetting(BjTable t) {
         t.setPhase(TablePhase.BETTING);
@@ -332,7 +407,6 @@ public class BjTableService {
         t.setCurrentSeatIndex(firstActiveSeat(t));
         scheduleTurnTimeout(t);
 
-        // Dealer a au moins 1 carte ici
         broadcast(t, "HAND_START", m(
                 "dealerUp", !t.getDealer().getCards().isEmpty() ? t.getDealer().getCards().get(0) : null,
                 "deadline", t.getPhaseDeadlineEpochMs(),
@@ -344,7 +418,7 @@ public class BjTableService {
 
     private void scheduleTurnTimeout(BjTable t) {
         Integer seatIdx = t.getCurrentSeatIndex();
-        if (seatIdx == null) return; // rien à faire (passera au croupier)
+        if (seatIdx == null) return;
         t.setPhaseDeadlineEpochMs(Instant.now().toEpochMilli() + TURN_MS);
 
         broadcast(t, "PLAYER_TURN", m("seat", seatIdx, "deadline", t.getPhaseDeadlineEpochMs()));
@@ -383,19 +457,39 @@ public class BjTableService {
     private void dealerTurn(BjTable t) {
         t.setPhase(TablePhase.DEALER_TURN);
         t.setCurrentSeatIndex(null);
+        // optionnel : on peut définir un deadline si on veut l'afficher (ici 0 = pas de deadline pour croupier)
+        t.setPhaseDeadlineEpochMs(0L);
         broadcast(t, "DEALER_TURN_START", m("dealer", t.getDealer()));
 
-        // règle simple : tirer jusqu'à 17 (soft 17 reste)
-        while (t.getDealer().bestTotal() < 17) {
-            t.getDealer().add(t.getShoe().draw());
-        }
-        broadcast(t, "DEALER_TURN_END", m("dealer", t.getDealer()));
+        // Runnable qui pioche progressivement et se re-schedule jusqu'à la condition d'arrêt
+        Runnable drawTask = new Runnable() {
+            @Override
+            public void run() {
+                synchronized (BjTableService.this) {
+                    // si la condition est de tirer jusqu'à 17 (soft 17 reste), on continue
+                    if (t.getDealer().bestTotal() < 17) {
+                        t.getDealer().add(t.getShoe().draw());
+                        // broadcast intermédiaire pour que le front affiche la carte piochée
+                        broadcast(t, "DEALER_TURN_UPDATE", m("dealer", t.getDealer()));
+                        // re-schedule une nouvelle itération (delay UX = 700ms)
+                        scheduler.schedule(this, 700, TimeUnit.MILLISECONDS);
+                    } else {
+                        // fin du tour du croupier
+                        broadcast(t, "DEALER_TURN_END", m("dealer", t.getDealer()));
+                        // passe aux paiements
+                        payouts(t);
+                    }
+                }
+            }
+        };
 
-        payouts(t);
+        // démarre la première itération avec un petit délai (donne le temps au front d'afficher)
+        scheduler.schedule(drawTask, 700, TimeUnit.MILLISECONDS);
     }
 
+
     private void payouts(BjTable t) {
-        t.setPhase(TablePhase.PAYOUT);
+        // calcule et crédite d'abord les paiements
         int dealerTotal = t.getDealer().bestTotal();
         boolean dealerBust = dealerTotal > 21;
 
@@ -409,7 +503,7 @@ public class BjTableService {
             long credit = 0;
             int total = s.getHand().bestTotal();
 
-            String outcome; // <-- NOUVEAU
+            String outcome;
 
             if (s.getHand().isBusted()) {
                 credit = 0;
@@ -436,7 +530,7 @@ public class BjTableService {
 
             if (credit > 0) {
                 Utilisateur u = utilisateurRepo.findByEmail(s.getEmail()).orElseThrow();
-                walletService.crediter(u, credit); // SSE déjà envoyée par WalletService
+                walletService.crediter(u, credit);
             }
 
             pay.add(Map.of(
@@ -444,18 +538,72 @@ public class BjTableService {
                     "bet",    bet,
                     "credit", credit,
                     "total",  total,
-                    "outcome", outcome // <-- NOUVEAU
+                    "outcome", outcome
             ));
         }
 
+        // on passe la table en phase PAYOUT et on lui donne un deadline (affichage résultats)
+        t.setPhase(TablePhase.PAYOUT);
+        t.setPhaseDeadlineEpochMs(Instant.now().toEpochMilli() + RESULT_MS);
+
+        // envoie d'abord l'événement PAYOUTS (payload détaillé)
         broadcast(t, "PAYOUTS", Map.of("payouts", pay));
 
-        // reset main
-        for (Seat s : t.getSeats().values()) s.resetForNextHand();
-        t.getDealer().getCards().clear();
-        t.setPhase(TablePhase.WAITING_FOR_PLAYERS);
-        broadcastState(t);
+        // et envoie aussi un TABLE_STATE qui contient lastPayouts pour que les clients gardent l'état pendant RESULT_MS
+        broadcast(t, "TABLE_STATE", m(
+                "tableId",          t.getId(),
+                "phase",            t.getPhase(),
+                "deadline",         t.getPhaseDeadlineEpochMs(),
+                "seats",            t.getSeats(),
+                "dealer",           t.getDealer(),
+                "currentSeatIndex", t.getCurrentSeatIndex(),
+                "isPrivate",        t.isPrivate(),
+                "code",             t.getCode(),
+                "creatorEmail",     t.getCreatorEmail(),
+                "lastPayouts",      pay
+        ));
+
+        // après RESULT_MS, on nettoie et on relance une nouvelle phase de mises
+        scheduler.schedule(() -> {
+            synchronized (BjTableService.this) {
+                // reset main
+                for (Seat s : t.getSeats().values()) s.resetForNextHand();
+                t.getDealer().getCards().clear();
+
+                // repasse en WAITING et broadcast normal
+                t.setPhase(TablePhase.WAITING_FOR_PLAYERS);
+                t.setPhaseDeadlineEpochMs(null);
+                broadcastState(t);
+                broadcastLobby();
+
+                // lance la prochaine betting phase
+                goBetting(t);
+            }
+        }, RESULT_MS, TimeUnit.MILLISECONDS);
+    }
+
+
+
+    // ------------------------------------------------------------------------
+    // Admin / close table
+    public synchronized void closeTable(Long tableId, String requesterEmail) {
+        BjTable t = mustTable(tableId);
+        boolean allowed = Objects.equals(t.getCreatorEmail(), requesterEmail);
+        if (!allowed) {
+            // admin override ?
+            Utilisateur u = utilisateurRepo.findByEmail(requesterEmail).orElse(null);
+            if (u != null && "ADMIN".equalsIgnoreCase(u.getRole())) allowed = true;
+        }
+        if (!allowed) throw new IllegalStateException("Seul le créateur ou un ADMIN peut fermer la table");
+
+        // cleanup : retirer les mappings & timers pour les joueurs assis
+        for (Seat s : t.getSeats().values()) {
+            if (s.getEmail() != null) {
+                userTable.remove(s.getEmail());
+                cancelDisconnectTimer(s.getEmail());
+            }
+        }
+        tables.remove(tableId);
         broadcastLobby();
-        goBetting(t);
     }
 }

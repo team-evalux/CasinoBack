@@ -4,8 +4,10 @@ package org.example.controller;
 import lombok.RequiredArgsConstructor;
 import org.example.dto.blackjack.*;
 import org.example.security.JwtUtil;
+import org.example.service.BjTableService;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.handler.annotation.MessageMapping;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.stereotype.Controller;
 
@@ -16,8 +18,9 @@ import java.util.List;
 @RequiredArgsConstructor
 public class BjWsController {
 
-    private final org.example.service.BjTableService service;
+    private final BjTableService service;
     private final JwtUtil jwtUtil;
+    private final SimpMessagingTemplate broker;
 
     private String resolveEmail(Principal principal, Message<?> msg) {
         if (principal != null) return principal.getName();
@@ -48,30 +51,50 @@ public class BjWsController {
     @MessageMapping("/bj/join")
     public void join(JoinOrCreateMsg msg, Principal principal, Message<?> message) {
         String email = resolveEmail(principal, message);
-        service.joinOrCreate(email, msg);
+        try {
+            service.joinOrCreate(email, msg);
+        } catch (Exception ex) {
+            broker.convertAndSendToUser(email, "/queue/bj/errors", java.util.Map.of("error", ex.getMessage()));
+        }
     }
 
     @MessageMapping("/bj/sit")
     public void sit(SitMsg msg, Principal principal, Message<?> message) {
         String email = resolveEmail(principal, message);
-        service.sit(email, msg.getTableId(), msg.getSeatIndex());
+        try {
+            service.sit(email, msg.getTableId(), msg.getSeatIndex());
+        } catch (Exception ex) {
+            broker.convertAndSendToUser(email, "/queue/bj/errors", java.util.Map.of("error", ex.getMessage()));
+        }
     }
 
     @MessageMapping("/bj/bet")
     public void bet(BetMsg msg, Principal principal, Message<?> message) {
         String email = resolveEmail(principal, message);
-        service.bet(email, msg);
+        try {
+            service.bet(email, msg);
+        } catch (Exception ex) {
+            broker.convertAndSendToUser(email, "/queue/bj/errors", java.util.Map.of("error", ex.getMessage()));
+        }
     }
 
     @MessageMapping("/bj/action")
     public void action(ActionMsg msg, Principal principal, Message<?> message) {
         String email = resolveEmail(principal, message);
-        service.action(email, msg);
+        try {
+            service.action(email, msg);
+        } catch (Exception ex) {
+            broker.convertAndSendToUser(email, "/queue/bj/errors", java.util.Map.of("error", ex.getMessage()));
+        }
     }
 
     @MessageMapping("/bj/leave")
     public void leave(SitMsg msg, Principal principal, Message<?> message) {
         String email = resolveEmail(principal, message);
-        service.leave(email, msg.getTableId(), msg.getSeatIndex());
+        try {
+            service.leave(email, msg.getTableId(), msg.getSeatIndex());
+        } catch (Exception ex) {
+            broker.convertAndSendToUser(email, "/queue/bj/errors", java.util.Map.of("error", ex.getMessage()));
+        }
     }
 }
