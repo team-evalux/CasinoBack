@@ -32,6 +32,10 @@ public class BjTable {
     private String creatorEmail;
     private Instant createdAt = Instant.now();
 
+    private String  name;
+    private Long    minBet;
+    private Long    maxBet;
+
     public BjTable(int maxSeats, boolean isPrivate, String code) {
         this.maxSeats = maxSeats;
         this.isPrivate = isPrivate;

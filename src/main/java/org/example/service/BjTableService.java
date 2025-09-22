@@ -66,7 +66,10 @@ public class BjTableService {
                 "currentSeatIndex", t.getCurrentSeatIndex(),
                 "isPrivate",        t.isPrivate(),
                 "code",             t.getCode(),
-                "creatorEmail",     t.getCreatorEmail()
+                "creatorEmail",     t.getCreatorEmail(),
+                "name",             t.getName(),
+                "minBet",           t.getMinBet(),
+                "maxBet",           t.getMaxBet()
         ));
     }
 
@@ -77,7 +80,10 @@ public class BjTableService {
                     "id",        t.getId(),
                     "maxSeats",  t.getMaxSeats(),
                     "isPrivate", t.isPrivate(),
-                    "phase",     t.getPhase() != null ? t.getPhase().name() : "WAITING_FOR_PLAYERS"
+                    "phase",     t.getPhase() != null ? t.getPhase().name() : "WAITING_FOR_PLAYERS",
+                    "name",      t.getName(),
+                    "minBet",    t.getMinBet(),
+                    "maxBet",    t.getMaxBet()
             ));
         }
         broker.convertAndSend("/topic/bj/lobby", list);
@@ -143,17 +149,25 @@ public class BjTableService {
     /**
      * Crée une table et, si creatorEmail != null, assied automatiquement le créateur au siège 0.
      */
-    public synchronized BjTable createTable(String creatorEmail, boolean isPrivate, String code, int maxSeats) {
+    // signature modifiée : ajoute name/minBet/maxBet
+    public synchronized BjTable createTable(String creatorEmail, boolean isPrivate, String code, int maxSeats,
+                                            String name, long minBet, long maxBet) {
         BjTable t = new BjTable(Math.max(2, Math.min(7, maxSeats)), isPrivate, code);
+
         t.setPhase(TablePhase.WAITING_FOR_PLAYERS);
         t.setPhaseDeadlineEpochMs(5L);
         t.setCurrentSeatIndex(null);
         t.setCreatorEmail(creatorEmail);
         t.setCreatedAt(Instant.now());
 
+        // nouveau : persister meta table
+        t.setName(name);
+        t.setMinBet(minBet);
+        t.setMaxBet(maxBet);
+
         tables.put(t.getId(), t);
 
-        // si on a un créateur (endpoint sécurisé), on l'assoit automatiquement au siège 0
+        // assise automatique du createur (inchangé)
         if (creatorEmail != null) {
             utilisateurRepo.findByEmail(creatorEmail).ifPresent(u -> {
                 Seat seat0 = t.getSeats().get(0);
@@ -180,20 +194,28 @@ public class BjTableService {
     }
 
     public synchronized BjTable joinOrCreate(String email, JoinOrCreateMsg msg) {
-        if (Boolean.TRUE.equals(msg.isCreatePublic())) {
-            return createTable(email, false, null, msg.getMaxSeats() != null ? msg.getMaxSeats() : 5);
+        // valeurs par défaut si non fournies
+        int maxSeats = (msg.getMaxSeats() != null) ? msg.getMaxSeats() : 5;
+        String name = msg.getName();
+        long minBet = (msg.getMinBet() != null) ? msg.getMinBet() : 0L;
+        long maxBet = (msg.getMaxBet() != null) ? msg.getMaxBet() : 0L;
+
+        if (Boolean.TRUE.equals(msg.getCreatePublic())) {
+            return createTable(email, false, null, maxSeats, name, minBet, maxBet);
         }
-        if (Boolean.TRUE.equals(msg.isCreatePrivate())) {
+        if (Boolean.TRUE.equals(msg.getCreatePrivate())) {
             String c = (msg.getCode() != null && !msg.getCode().isBlank())
                     ? msg.getCode()
                     : UUID.randomUUID().toString().substring(0, 6);
-            return createTable(email, true, c, msg.getMaxSeats() != null ? msg.getMaxSeats() : 5);
+            return createTable(email, true, c, maxSeats, name, minBet, maxBet);
         }
         if (msg.getTableId() != null) {
             return mustTable(msg.getTableId());
         }
+
+        // fallback : reuse or create first public table (avec meta par défaut)
         return listPublicTables().stream().findFirst()
-                .orElseGet(() -> createTable(email, false, null, 5));
+                .orElseGet(() -> createTable(email, false, null, 5, null, 0L, 0L));
     }
 
     public synchronized void sit(String email, Long tableId, int seatIndex) {
@@ -247,6 +269,16 @@ public class BjTableService {
 
         long amount = msg.getAmount();
         if (amount <= 0) throw new IllegalArgumentException("Mise invalide");
+
+        // VALIDATION min/max
+        long min = t.getMinBet() != null ? t.getMinBet() : 0L;
+        long max = t.getMaxBet() != null ? t.getMaxBet() : Long.MAX_VALUE;
+        if (min > 0 && amount < min) {
+            throw new IllegalArgumentException("Mise inférieure au minimum (" + min + ")");
+        }
+        if (max > 0 && max != Long.MAX_VALUE && amount > max) {
+            throw new IllegalArgumentException("Mise supérieure au maximum (" + max + ")");
+        }
 
         seat.getHand().setBet(amount);
 
@@ -560,6 +592,9 @@ public class BjTableService {
                 "isPrivate",        t.isPrivate(),
                 "code",             t.getCode(),
                 "creatorEmail",     t.getCreatorEmail(),
+                "name",             t.getName(),
+                "minBet",           t.getMinBet(),
+                "maxBet",           t.getMaxBet(),
                 "lastPayouts",      pay
         ));
 

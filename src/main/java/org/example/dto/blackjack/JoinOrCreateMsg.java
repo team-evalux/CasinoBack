@@ -4,9 +4,12 @@ import lombok.Data;
 
 @Data
 public class JoinOrCreateMsg {
-    private Long tableId;       // rejoindre table publique existante
-    private boolean createPublic;
-    private boolean createPrivate;
-    private String code;        // pour private
-    private Integer maxSeats;   // optionnel (default 5)
+    private Long tableId;
+    private Boolean createPublic;   // use wrapper Boolean so client can omit
+    private Boolean createPrivate;
+    private Integer maxSeats;
+    private String code;
+    private String name;
+    private Long minBet;
+    private Long maxBet;
 }

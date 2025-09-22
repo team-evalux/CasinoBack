@@ -35,13 +35,22 @@ public class BjLobbyController {
     @PostMapping("/table")
     public ResponseEntity<?> create(@RequestBody CreateReq req, Principal principal) {
         String creator = principal != null ? principal.getName() : null;
-        BjTable t = service.createTable(creator,
+        BjTable t = service.createTable(
+                creator,
                 Boolean.TRUE.equals(req.privateTable),
-                req.code, req.maxSeats != null ? req.maxSeats : 5);
+                req.getCode(),
+                req.getMaxSeats() != null ? req.getMaxSeats() : 5,
+                req.getName(),
+                req.getMinBet() != null ? req.getMinBet() : 0L,
+                req.getMaxBet() != null ? req.getMaxBet() : 0L
+        );
 
         Map<String,Object> out = new java.util.HashMap<>();
         out.put("id", t.getId());
         out.put("private", t.isPrivate());
+        out.put("name", t.getName());
+        out.put("minBet", t.getMinBet());
+        out.put("maxBet", t.getMaxBet());
         if (t.getCode() != null) out.put("code", t.getCode());
         return ResponseEntity.ok(out);
     }
@@ -58,5 +67,8 @@ public class BjLobbyController {
         private Boolean privateTable;
         private Integer maxSeats;
         private String  code;
+        private String  name;
+        private Long    minBet;
+        private Long    maxBet;
     }
 }
