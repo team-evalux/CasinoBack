@@ -6,4 +6,5 @@ import lombok.Data;
 public class SitMsg {
     private Long tableId;
     private Integer seatIndex;
+    private String code;
 }

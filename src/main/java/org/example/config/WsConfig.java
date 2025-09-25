@@ -19,15 +19,18 @@ public class WsConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws")
-                .addInterceptors(jwtHandshakeInterceptor) // <-- important
-                .setAllowedOriginPatterns("http://localhost:4200")
+                .addInterceptors(jwtHandshakeInterceptor) // <-- important: handshake stores token in session attributes
+                .setAllowedOriginPatterns("http://localhost:4200") // adapte si tu as d'autres origines
                 .withSockJS();
     }
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
-        registry.enableSimpleBroker("/topic");
+        // Important : expose /queue pour les destinations user (convertAndSendToUser)
+        registry.enableSimpleBroker("/topic", "/queue");
         registry.setApplicationDestinationPrefixes("/app");
+        // important pour les destinations user (client s'abonne sur /user/queue/...)
+        registry.setUserDestinationPrefix("/user");
     }
 
     @Override

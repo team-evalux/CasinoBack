@@ -5,13 +5,10 @@ import lombok.Data;
 
 import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicLong;
 
 @Data
 public class BjTable {
-    private static final AtomicLong SEQ = new AtomicLong(1);
-
-    private final Long id = SEQ.getAndIncrement();
+    private Long id; // sera défini par la BD lors de la création persistée
     private final String code; // null si publique
     private final boolean isPrivate;
     private final int maxSeats;
@@ -36,10 +33,17 @@ public class BjTable {
     private Long    minBet;
     private Long    maxBet;
 
-    public BjTable(int maxSeats, boolean isPrivate, String code) {
+    // constructeur : id peut être null (on récupère l'id DB si présent)
+    public BjTable(Long id, int maxSeats, boolean isPrivate, String code) {
+        this.id = id;
         this.maxSeats = maxSeats;
         this.isPrivate = isPrivate;
         this.code = code;
-        for (int i=0;i<maxSeats;i++) seats.put(i, new Seat());
+        for (int i = 0; i < maxSeats; i++) seats.put(i, new Seat());
+    }
+
+    // fallback si on veut construire sans id (compatibilité)
+    public BjTable(int maxSeats, boolean isPrivate, String code) {
+        this(null, maxSeats, isPrivate, code);
     }
 }

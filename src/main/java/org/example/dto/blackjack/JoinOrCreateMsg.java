@@ -5,10 +5,13 @@ import lombok.Data;
 @Data
 public class JoinOrCreateMsg {
     private Long tableId;
-    private Boolean createPublic;   // use wrapper Boolean so client can omit
-    private Boolean createPrivate;
-    private Integer maxSeats;
     private String code;
+
+    // flags optionnels pour création via WS
+    private Boolean createPublic;
+    private Boolean createPrivate;
+
+    private Integer maxSeats;
     private String name;
     private Long minBet;
     private Long maxBet;

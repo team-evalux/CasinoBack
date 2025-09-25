@@ -34,12 +34,12 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
                 }
             }
 
-            // 3) stocker dans les attributes de session WS
+            // 3) stocker dans les attributes de session WS pour usage ultérieur
             if (token != null && !token.isBlank()) {
                 attributes.put("token", token);
             }
         }
-        return true; // OK pour poursuivre le handshake
+        return true; // poursuivre le handshake
     }
 
     @Override

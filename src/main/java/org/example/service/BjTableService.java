@@ -1,10 +1,12 @@
 // src/main/java/org/example/service/BjTableService.java
 package org.example.service;
 
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.example.dto.blackjack.*;
 import org.example.model.Utilisateur;
 import org.example.model.blackjack.*;
+import org.example.repo.BjTableRepository;
 import org.example.repo.UtilisateurRepository;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -19,9 +21,15 @@ public class BjTableService {
 
     private final WalletService walletService;
     private final UtilisateurRepository utilisateurRepo;
+    private final BjTableRepository bjTableRepository;
     private final SimpMessagingTemplate broker;
 
+    // runtime tables (id DB -> runtime object)
     private final Map<Long, BjTable> tables = new ConcurrentHashMap<>();
+
+    // emails autorisés pour joindre une table privée (tableId -> set d'emails)
+    private final Map<Long, Set<String>> privateAccess = new ConcurrentHashMap<>();
+
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(3);
 
     // mapping email -> tableId (un utilisateur assis sur au plus une table)
@@ -30,12 +38,10 @@ public class BjTableService {
     // timers pour nettoyage après déconnexion (email -> scheduledFuture)
     private final Map<String, ScheduledFuture<?>> disconnectTimers = new ConcurrentHashMap<>();
 
-    // paramètres
-    // paramètres
     private static final long BETTING_MS = 10_000;
     private static final long TURN_MS    = 20_000;
-    private static final long RESULT_MS = 10_000; // <-- affiche les résultats pendant 10s
-    private static final long DISCONNECT_GRACE_MS = 120_000; // 2 minutes de grâce
+    private static final long RESULT_MS = 10_000;
+    private static final long DISCONNECT_GRACE_MS = 120_000;
 
 
     // ------------------------------------------------------------------------
@@ -52,11 +58,31 @@ public class BjTableService {
     }
 
     private void broadcast(BjTable t, String type, Object payload) {
-        broker.convertAndSend("/topic/bj/table/" + t.getId(),
-                TableEvent.builder().type(type).payload(payload).build());
+        TableEvent ev = TableEvent.builder().type(type).payload(payload).build();
+        if (!t.isPrivate()) {
+            String dest = "/topic/bj/table/" + t.getId();
+            System.out.println("BROADCAST -> dest=" + dest + " type=" + type + " payloadType=" + (payload != null ? payload.getClass().getSimpleName() : "null"));
+            broker.convertAndSend(dest, ev);
+            return;
+        }
+
+        // privé : calcule set d'emails autorisés (creator + seated + explicit privateAccess)
+        Set<String> allowed = new HashSet<>();
+        if (t.getCreatorEmail() != null) allowed.add(t.getCreatorEmail());
+        for (Seat s : t.getSeats().values()) if (s.getEmail() != null) allowed.add(s.getEmail());
+        Set<String> extra = privateAccess.get(t.getId());
+        if (extra != null) allowed.addAll(extra);
+
+        // envoie à chaque utilisateur autorisé sur sa destination user queue
+        for (String email : allowed) {
+            String dest = "/queue/bj/table/" + t.getId();
+            System.out.println("BROADCAST (private) -> user=" + email + " dest=/user/" + email + dest + " type=" + type);
+            broker.convertAndSendToUser(email, dest, ev);
+        }
     }
 
     private void broadcastState(BjTable t) {
+        // NOTE : on n'envoie PAS le code dans le TABLE_STATE
         broadcast(t, "TABLE_STATE", m(
                 "tableId",          t.getId(),
                 "phase",            t.getPhase(),
@@ -65,7 +91,6 @@ public class BjTableService {
                 "dealer",           t.getDealer(),
                 "currentSeatIndex", t.getCurrentSeatIndex(),
                 "isPrivate",        t.isPrivate(),
-                "code",             t.getCode(),
                 "creatorEmail",     t.getCreatorEmail(),
                 "name",             t.getName(),
                 "minBet",           t.getMinBet(),
@@ -73,9 +98,14 @@ public class BjTableService {
         ));
     }
 
+    public List<BjTable> listTables() {
+        return new ArrayList<>(tables.values());
+    }
+
+
     private void broadcastLobby() {
         List<Map<String, Object>> list = new ArrayList<>();
-        for (BjTable t : listPublicTables()) {
+        for (BjTable t : tables.values()) {
             list.add(m(
                     "id",        t.getId(),
                     "maxSeats",  t.getMaxSeats(),
@@ -86,6 +116,7 @@ public class BjTableService {
                     "maxBet",    t.getMaxBet()
             ));
         }
+        System.out.println("BROADCAST -> /topic/bj/lobby (tables=" + list.size() + ")");
         broker.convertAndSend("/topic/bj/lobby", list);
     }
 
@@ -142,32 +173,73 @@ public class BjTableService {
         }, DISCONNECT_GRACE_MS, TimeUnit.MILLISECONDS);
         disconnectTimers.put(email, future);
     }
-
     // ------------------------------------------------------------------------
     // PUBLIC API
 
+    @PostConstruct
+    private void loadTablesFromDb() {
+        List<BjTableEntity> entities = bjTableRepository.findAll();
+        for (BjTableEntity e : entities) {
+            int seats = (e.getMaxSeats() != null) ? e.getMaxSeats() : 5;
+            BjTable t = new BjTable(e.getId(), seats, e.isPrivate(), e.getCode());
+            t.setName(e.getName());
+            t.setMinBet(e.getMinBet());
+            t.setMaxBet(e.getMaxBet());
+            t.setCreatorEmail(e.getCreatorEmail());
+            t.setCreatedAt(e.getCreatedAt());
+            // phase par défaut WAITING; les états runtime (seats, shoe, dealer) sont réinitialisés
+            tables.put(t.getId(), t);
+            // autoriser automatiquement le créateur pour les privées
+            if (t.isPrivate() && t.getCreatorEmail() != null) {
+                privateAccess.computeIfAbsent(t.getId(), k -> ConcurrentHashMap.newKeySet()).add(t.getCreatorEmail());
+            }
+        }
+        broadcastLobby();
+    }
+
     /**
      * Crée une table et, si creatorEmail != null, assied automatiquement le créateur au siège 0.
+     *
+     * NOTE: pour les tables privées le 'code' est obligatoire (selon ta demande).
      */
-    // signature modifiée : ajoute name/minBet/maxBet
     public synchronized BjTable createTable(String creatorEmail, boolean isPrivate, String code, int maxSeats,
                                             String name, long minBet, long maxBet) {
-        BjTable t = new BjTable(Math.max(2, Math.min(7, maxSeats)), isPrivate, code);
+        if (isPrivate && (code == null || code.isBlank())) {
+            throw new IllegalArgumentException("Code requis pour une table privée");
+        }
 
+        // persist entity
+        BjTableEntity ent = new BjTableEntity();
+        ent.setPrivate(isPrivate);
+        ent.setCode(code);
+        ent.setMaxSeats(maxSeats);
+        ent.setName(name);
+        ent.setMinBet(minBet);
+        ent.setMaxBet(maxBet);
+        ent.setCreatorEmail(creatorEmail);
+        ent.setCreatedAt(Instant.now());
+
+        BjTableEntity saved = bjTableRepository.save(ent);
+
+        // create runtime object with DB id
+        BjTable t = new BjTable(saved.getId(), Math.max(2, Math.min(7, maxSeats)), isPrivate, code);
         t.setPhase(TablePhase.WAITING_FOR_PLAYERS);
         t.setPhaseDeadlineEpochMs(5L);
         t.setCurrentSeatIndex(null);
         t.setCreatorEmail(creatorEmail);
-        t.setCreatedAt(Instant.now());
-
-        // nouveau : persister meta table
+        t.setCreatedAt(saved.getCreatedAt());
         t.setName(name);
         t.setMinBet(minBet);
         t.setMaxBet(maxBet);
 
         tables.put(t.getId(), t);
 
-        // assise automatique du createur (inchangé)
+        // autorise automatiquement le créateur pour les privées
+        if (isPrivate && creatorEmail != null) {
+            privateAccess.computeIfAbsent(t.getId(), k -> ConcurrentHashMap.newKeySet()).add(creatorEmail);
+        }
+
+        // assise automatique du createur
         if (creatorEmail != null) {
             utilisateurRepo.findByEmail(creatorEmail).ifPresent(u -> {
                 Seat seat0 = t.getSeats().get(0);
@@ -193,8 +265,11 @@ public class BjTableService {
         return out;
     }
 
+    /**
+     * Si msg.tableId est fourni et que la table est privée, on exige le code et on autorise l'email si OK.
+     * Si createPrivate=true on exige un code non vide (création).
+     */
     public synchronized BjTable joinOrCreate(String email, JoinOrCreateMsg msg) {
-        // valeurs par défaut si non fournies
         int maxSeats = (msg.getMaxSeats() != null) ? msg.getMaxSeats() : 5;
         String name = msg.getName();
         long minBet = (msg.getMinBet() != null) ? msg.getMinBet() : 0L;
@@ -204,34 +279,89 @@ public class BjTableService {
             return createTable(email, false, null, maxSeats, name, minBet, maxBet);
         }
         if (Boolean.TRUE.equals(msg.getCreatePrivate())) {
-            String c = (msg.getCode() != null && !msg.getCode().isBlank())
-                    ? msg.getCode()
-                    : UUID.randomUUID().toString().substring(0, 6);
-            return createTable(email, true, c, maxSeats, name, minBet, maxBet);
+            if (msg.getCode() == null || msg.getCode().isBlank()) {
+                throw new IllegalArgumentException("Code requis pour créer une table privée");
+            }
+            return createTable(email, true, msg.getCode(), maxSeats, name, minBet, maxBet);
         }
         if (msg.getTableId() != null) {
-            return mustTable(msg.getTableId());
+            BjTable t = mustTable(msg.getTableId());
+            if (t.isPrivate()) {
+                if (msg.getCode() == null || !Objects.equals(msg.getCode(), t.getCode())) {
+                    throw new IllegalStateException("Code d'accès invalide pour cette table privée");
+                }
+                if (email != null) {
+                    privateAccess.computeIfAbsent(t.getId(), k -> ConcurrentHashMap.newKeySet()).add(email);
+                }
+            }
+            return t;
         }
 
-        // fallback : reuse or create first public table (avec meta par défaut)
         return listPublicTables().stream().findFirst()
                 .orElseGet(() -> createTable(email, false, null, 5, null, 0L, 0L));
     }
 
-    public synchronized void sit(String email, Long tableId, int seatIndex) {
-        // protection : un utilisateur ne peut être assis que sur une table
+    /**
+     * Méthode publique pratique : autorise un email pour une table si le code correspond.
+     * Retourne true si autorisé, false sinon.
+     * Tu peux appeler cette méthode depuis ton WsController si tu reçois le code séparément.
+     */
+    public synchronized boolean authorizeEmailForTable(Long tableId, String email, String code) {
+        BjTable t = tables.get(tableId);
+        if (t == null) return false;
+        if (!t.isPrivate()) return true;
+        if (code != null && Objects.equals(code, t.getCode())) {
+            privateAccess.computeIfAbsent(tableId, k -> ConcurrentHashMap.newKeySet()).add(email);
+            System.out.println("authorizeEmailForTable t=" + tableId + " email=" + email + " code=" + code + " -> authorized");
+            return true;
+        }
+        System.out.println("authorizeEmailForTable t=" + tableId + " email=" + email + " code=" + code + " -> NOT authorized");
+        return false;
+    }
+
+    // src/main/java/org/example/service/BjTableService.java
+// Remplace la méthode existante `public synchronized void sit(String email, Long tableId, int seatIndex)`
+// par la version ci-dessous.
+
+    public synchronized void sit(String email, Long tableId, Integer seatIndex) {
         Long already = userTable.get(email);
         if (already != null && !already.equals(tableId)) {
             throw new IllegalStateException("Tu es déjà assis sur une autre table");
         }
 
         BjTable t = mustTable(tableId);
+
+        // Si table privée, vérifier que l'email est autorisé (créateur ou a fourni le bon code précédemment)
+        if (t.isPrivate()) {
+            if (!Objects.equals(t.getCreatorEmail(), email)) {
+                Set<String> allowed = privateAccess.get(tableId);
+                if (allowed == null || !allowed.contains(email)) {
+                    throw new IllegalStateException("Accès refusé : code requis pour cette table privée");
+                }
+            }
+        }
+
+        // Si seatIndex null : choisit le premier siège vide
+        if (seatIndex == null) {
+            Integer firstEmpty = null;
+            for (Map.Entry<Integer, Seat> e : t.getSeats().entrySet()) {
+                Seat s = e.getValue();
+                if (s == null || s.getStatus() == SeatStatus.EMPTY) {
+                    firstEmpty = e.getKey();
+                    break;
+                }
+            }
+            if (firstEmpty == null) {
+                throw new IllegalStateException("Aucun siège disponible");
+            }
+            seatIndex = firstEmpty;
+        }
+
         Seat seat = t.getSeats().get(seatIndex);
         if (seat == null) throw new IllegalArgumentException("Seat invalide");
         if (seat.getStatus() != SeatStatus.EMPTY && !Objects.equals(seat.getEmail(), email))
             throw new IllegalStateException("Seat occupé");
 
-        // règle : sur une table publique on n'autorise pas de nouveaux joueurs en plein milieu d'une main
         if (!t.isPrivate() && (t.getPhase() == TablePhase.PLAYING || t.getPhase() == TablePhase.DEALER_TURN)) {
             throw new IllegalStateException("Impossible de rejoindre une table publique en cours de main. Attends la prochaine main.");
         }
@@ -250,6 +380,7 @@ public class BjTableService {
         }
         broadcastLobby();
     }
+
 
     public synchronized void bet(String email, BetMsg msg) {
         BjTable t = mustTable(msg.getTableId());
@@ -386,6 +517,8 @@ public class BjTableService {
 
     // ------------------------------------------------------------------------
     // LOGIQUE DE PHASES (inchangée sauf usage des nouvelles structures)
+    // (les méthodes goBetting/lockBetsAndDeal/scheduleTurnTimeout/nextTurnOrDealer/dealerTurn/payouts
+    // restent inchangées — je les conserve tels quels)
 
     private void goBetting(BjTable t) {
         t.setPhase(TablePhase.BETTING);
@@ -399,7 +532,6 @@ public class BjTableService {
     }
 
     private void lockBetsAndDeal(BjTable t) {
-        // valider mises (débit)
         boolean aDesMises = false;
         for (Map.Entry<Integer, Seat> e : t.getSeats().entrySet()) {
             Seat s = e.getValue();
@@ -409,7 +541,7 @@ public class BjTableService {
                     Utilisateur u = utilisateurRepo.findByEmail(s.getEmail()).orElseThrow();
                     walletService.debiter(u, s.getHand().getBet());
                 } catch (Exception ex) {
-                    s.getHand().setBet(0); // solde insuffisant -> annule la mise
+                    s.getHand().setBet(0);
                 }
             }
         }
@@ -420,7 +552,6 @@ public class BjTableService {
             return;
         }
 
-        // reset dealer + distribuer 2 cartes
         t.getDealer().getCards().clear();
         t.getDealer().setStanding(false);
         t.getDealer().setBusted(false);
@@ -489,39 +620,29 @@ public class BjTableService {
     private void dealerTurn(BjTable t) {
         t.setPhase(TablePhase.DEALER_TURN);
         t.setCurrentSeatIndex(null);
-        // optionnel : on peut définir un deadline si on veut l'afficher (ici 0 = pas de deadline pour croupier)
         t.setPhaseDeadlineEpochMs(0L);
         broadcast(t, "DEALER_TURN_START", m("dealer", t.getDealer()));
 
-        // Runnable qui pioche progressivement et se re-schedule jusqu'à la condition d'arrêt
         Runnable drawTask = new Runnable() {
             @Override
             public void run() {
                 synchronized (BjTableService.this) {
-                    // si la condition est de tirer jusqu'à 17 (soft 17 reste), on continue
                     if (t.getDealer().bestTotal() < 17) {
                         t.getDealer().add(t.getShoe().draw());
-                        // broadcast intermédiaire pour que le front affiche la carte piochée
                         broadcast(t, "DEALER_TURN_UPDATE", m("dealer", t.getDealer()));
-                        // re-schedule une nouvelle itération (delay UX = 700ms)
                         scheduler.schedule(this, 700, TimeUnit.MILLISECONDS);
                     } else {
-                        // fin du tour du croupier
                         broadcast(t, "DEALER_TURN_END", m("dealer", t.getDealer()));
-                        // passe aux paiements
                         payouts(t);
                     }
                 }
             }
         };
 
-        // démarre la première itération avec un petit délai (donne le temps au front d'afficher)
         scheduler.schedule(drawTask, 700, TimeUnit.MILLISECONDS);
     }
 
-
     private void payouts(BjTable t) {
-        // calcule et crédite d'abord les paiements
         int dealerTotal = t.getDealer().bestTotal();
         boolean dealerBust = dealerTotal > 21;
 
@@ -544,7 +665,7 @@ public class BjTableService {
                 credit = bet;
                 outcome = "PUSH";
             } else if (s.getHand().isBlackjack()) {
-                credit = bet + (bet * 3) / 2; // 3:2
+                credit = bet + (bet * 3) / 2;
                 outcome = "BLACKJACK";
             } else if (t.getDealer().isBlackjack()) {
                 credit = 0;
@@ -574,14 +695,13 @@ public class BjTableService {
             ));
         }
 
-        // on passe la table en phase PAYOUT et on lui donne un deadline (affichage résultats)
         t.setPhase(TablePhase.PAYOUT);
         t.setPhaseDeadlineEpochMs(Instant.now().toEpochMilli() + RESULT_MS);
 
         // envoie d'abord l'événement PAYOUTS (payload détaillé)
         broadcast(t, "PAYOUTS", Map.of("payouts", pay));
 
-        // et envoie aussi un TABLE_STATE qui contient lastPayouts pour que les clients gardent l'état pendant RESULT_MS
+        // envoie aussi TABLE_STATE sans code
         broadcast(t, "TABLE_STATE", m(
                 "tableId",          t.getId(),
                 "phase",            t.getPhase(),
@@ -590,7 +710,6 @@ public class BjTableService {
                 "dealer",           t.getDealer(),
                 "currentSeatIndex", t.getCurrentSeatIndex(),
                 "isPrivate",        t.isPrivate(),
-                "code",             t.getCode(),
                 "creatorEmail",     t.getCreatorEmail(),
                 "name",             t.getName(),
                 "minBet",           t.getMinBet(),
@@ -598,20 +717,16 @@ public class BjTableService {
                 "lastPayouts",      pay
         ));
 
-        // après RESULT_MS, on nettoie et on relance une nouvelle phase de mises
         scheduler.schedule(() -> {
             synchronized (BjTableService.this) {
-                // reset main
                 for (Seat s : t.getSeats().values()) s.resetForNextHand();
                 t.getDealer().getCards().clear();
 
-                // repasse en WAITING et broadcast normal
                 t.setPhase(TablePhase.WAITING_FOR_PLAYERS);
                 t.setPhaseDeadlineEpochMs(null);
                 broadcastState(t);
                 broadcastLobby();
 
-                // lance la prochaine betting phase
                 goBetting(t);
             }
         }, RESULT_MS, TimeUnit.MILLISECONDS);
@@ -625,13 +740,11 @@ public class BjTableService {
         BjTable t = mustTable(tableId);
         boolean allowed = Objects.equals(t.getCreatorEmail(), requesterEmail);
         if (!allowed) {
-            // admin override ?
             Utilisateur u = utilisateurRepo.findByEmail(requesterEmail).orElse(null);
             if (u != null && "ADMIN".equalsIgnoreCase(u.getRole())) allowed = true;
         }
         if (!allowed) throw new IllegalStateException("Seul le créateur ou un ADMIN peut fermer la table");
 
-        // cleanup : retirer les mappings & timers pour les joueurs assis
         for (Seat s : t.getSeats().values()) {
             if (s.getEmail() != null) {
                 userTable.remove(s.getEmail());
@@ -639,6 +752,11 @@ public class BjTableService {
             }
         }
         tables.remove(tableId);
+        privateAccess.remove(tableId);
+
+        // supprime en base
+        try { bjTableRepository.deleteById(tableId); } catch (Exception ignored) {}
+
         broadcastLobby();
     }
 }
