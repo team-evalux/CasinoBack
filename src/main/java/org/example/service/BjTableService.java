@@ -60,29 +60,20 @@ public class BjTableService {
     private void broadcast(BjTable t, String type, Object payload) {
         TableEvent ev = TableEvent.builder().type(type).payload(payload).build();
         if (!t.isPrivate()) {
-            String dest = "/topic/bj/table/" + t.getId();
-            System.out.println("BROADCAST -> dest=" + dest + " type=" + type + " payloadType=" + (payload != null ? payload.getClass().getSimpleName() : "null"));
-            broker.convertAndSend(dest, ev);
+            broker.convertAndSend("/topic/bj/table/" + t.getId(), ev);
             return;
         }
-
-        // privé : calcule set d'emails autorisés (creator + seated + explicit privateAccess)
         Set<String> allowed = new HashSet<>();
         if (t.getCreatorEmail() != null) allowed.add(t.getCreatorEmail());
         for (Seat s : t.getSeats().values()) if (s.getEmail() != null) allowed.add(s.getEmail());
         Set<String> extra = privateAccess.get(t.getId());
         if (extra != null) allowed.addAll(extra);
-
-        // envoie à chaque utilisateur autorisé sur sa destination user queue
         for (String email : allowed) {
-            String dest = "/queue/bj/table/" + t.getId();
-            System.out.println("BROADCAST (private) -> user=" + email + " dest=/user/" + email + dest + " type=" + type);
-            broker.convertAndSendToUser(email, dest, ev);
+            broker.convertAndSendToUser(email, "/queue/bj/table/" + t.getId(), ev);
         }
     }
 
     private void broadcastState(BjTable t) {
-        // NOTE : on n'envoie PAS le code dans le TABLE_STATE
         broadcast(t, "TABLE_STATE", m(
                 "tableId",          t.getId(),
                 "phase",            t.getPhase(),
@@ -102,21 +93,20 @@ public class BjTableService {
         return new ArrayList<>(tables.values());
     }
 
-
     private void broadcastLobby() {
         List<Map<String, Object>> list = new ArrayList<>();
         for (BjTable t : tables.values()) {
             list.add(m(
-                    "id",        t.getId(),
-                    "maxSeats",  t.getMaxSeats(),
-                    "isPrivate", t.isPrivate(),
-                    "phase",     t.getPhase() != null ? t.getPhase().name() : "WAITING_FOR_PLAYERS",
-                    "name",      t.getName(),
-                    "minBet",    t.getMinBet(),
-                    "maxBet",    t.getMaxBet()
+                    "id",           t.getId(),
+                    "maxSeats",     t.getMaxSeats(),
+                    "isPrivate",    t.isPrivate(),
+                    "phase",        t.getPhase() != null ? t.getPhase().name() : "WAITING_FOR_PLAYERS",
+                    "name",         t.getName(),
+                    "minBet",       t.getMinBet(),
+                    "maxBet",       t.getMaxBet(),
+                    "creatorEmail", t.getCreatorEmail()   // ✅ maintenant exposé
             ));
         }
-        System.out.println("BROADCAST -> /topic/bj/lobby (tables=" + list.size() + ")");
         broker.convertAndSend("/topic/bj/lobby", list);
     }
 
@@ -187,9 +177,7 @@ public class BjTableService {
             t.setMaxBet(e.getMaxBet());
             t.setCreatorEmail(e.getCreatorEmail());
             t.setCreatedAt(e.getCreatedAt());
-            // phase par défaut WAITING; les états runtime (seats, shoe, dealer) sont réinitialisés
             tables.put(t.getId(), t);
-            // autoriser automatiquement le créateur pour les privées
             if (t.isPrivate() && t.getCreatorEmail() != null) {
                 privateAccess.computeIfAbsent(t.getId(), k -> ConcurrentHashMap.newKeySet()).add(t.getCreatorEmail());
             }

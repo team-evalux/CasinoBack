@@ -22,13 +22,14 @@ public class BjLobbyController {
         List<Map<String,Object>> out = new ArrayList<>();
         for (BjTable t : service.listTables()) {
             Map<String,Object> row = new LinkedHashMap<>();
-            row.put("id",        t.getId());
-            row.put("maxSeats",  t.getMaxSeats());
-            row.put("isPrivate", t.isPrivate());
-            row.put("phase",     t.getPhase() != null ? t.getPhase().name() : "WAITING_FOR_PLAYERS");
-            row.put("name",      t.getName());
-            row.put("minBet",    t.getMinBet());
-            row.put("maxBet",    t.getMaxBet());
+            row.put("id",           t.getId());
+            row.put("maxSeats",     t.getMaxSeats());
+            row.put("isPrivate",    t.isPrivate());
+            row.put("phase",        t.getPhase() != null ? t.getPhase().name() : "WAITING_FOR_PLAYERS");
+            row.put("name",         t.getName());
+            row.put("minBet",       t.getMinBet());
+            row.put("maxBet",       t.getMaxBet());
+            row.put("creatorEmail", t.getCreatorEmail());   // ✅ exposé
             out.add(row);
         }
         return ResponseEntity.ok(out);
@@ -39,14 +40,13 @@ public class BjLobbyController {
         BjTable t = service.getTable(id);
         if (t == null) return ResponseEntity.notFound().build();
         Map<String,Object> out = new LinkedHashMap<>();
-        out.put("id", t.getId());
-        out.put("maxSeats", t.getMaxSeats());
-        out.put("isPrivate", t.isPrivate());
-        out.put("name", t.getName());
-        out.put("minBet", t.getMinBet());
-        out.put("maxBet", t.getMaxBet());
-        out.put("creatorEmail", t.getCreatorEmail());
-        // si le créateur demande -> renvoyer le code (pour qu'il puisse le partager)
+        out.put("id",           t.getId());
+        out.put("maxSeats",     t.getMaxSeats());
+        out.put("isPrivate",    t.isPrivate());
+        out.put("name",         t.getName());
+        out.put("minBet",       t.getMinBet());
+        out.put("maxBet",       t.getMaxBet());
+        out.put("creatorEmail", t.getCreatorEmail());   // ✅ exposé aussi ici
         if (t.isPrivate() && principal != null && Objects.equals(principal.getName(), t.getCreatorEmail())) {
             out.put("code", t.getCode());
         }
@@ -67,13 +67,16 @@ public class BjLobbyController {
                     req.getMaxBet() != null ? req.getMaxBet() : 0L
             );
 
-            Map<String,Object> out = new java.util.HashMap<>();
+            Map<String,Object> out = new HashMap<>();
             out.put("id", t.getId());
             out.put("isPrivate", t.isPrivate());
             out.put("name", t.getName());
             out.put("minBet", t.getMinBet());
             out.put("maxBet", t.getMaxBet());
-            if (t.getCode() != null && creator != null && creator.equals(t.getCreatorEmail())) out.put("code", t.getCode());
+            out.put("creatorEmail", t.getCreatorEmail());   // ✅ ajouté
+            if (t.getCode() != null && creator != null && creator.equals(t.getCreatorEmail())) {
+                out.put("code", t.getCode());
+            }
             return ResponseEntity.ok(out);
         } catch (IllegalArgumentException iae) {
             return ResponseEntity.badRequest().body(Map.of("error", iae.getMessage()));
