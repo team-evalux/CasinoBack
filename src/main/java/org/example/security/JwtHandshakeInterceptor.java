@@ -1,4 +1,3 @@
-// src/main/java/org/example/security/JwtHandshakeInterceptor.java
 package org.example.security;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -23,10 +22,10 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
         if (request instanceof ServletServerHttpRequest http) {
             HttpServletRequest req = http.getServletRequest();
 
-            // 1) token via query param ?token=...
+            // 1) Cherche un token dans les paramètres de l’URL (?token=...)
             String token = req.getParameter("token");
 
-            // 2) sinon header Authorization: Bearer ...
+            // 2) Sinon, tente dans l’entête HTTP Authorization
             if (token == null) {
                 String auth = req.getHeader("Authorization");
                 if (auth != null && auth.startsWith("Bearer ")) {
@@ -34,12 +33,12 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
                 }
             }
 
-            // 3) stocker dans les attributes de session WS pour usage ultérieur
+            // 3) Si trouvé, le stocke dans les attributs de la session WebSocket
             if (token != null && !token.isBlank()) {
                 attributes.put("token", token);
             }
         }
-        return true; // poursuivre le handshake
+        return true; // continue le handshake
     }
 
     @Override
@@ -47,6 +46,6 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
                                ServerHttpResponse response,
                                WebSocketHandler wsHandler,
                                @Nullable Exception ex) {
-        // rien à faire
+        // rien à faire après
     }
 }

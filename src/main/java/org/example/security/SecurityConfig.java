@@ -2,7 +2,7 @@ package org.example.security;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.*;
-import org.springframework.http.HttpMethod; // <— ajoute ça
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -17,8 +17,8 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.List;
 
-@Configuration
-@EnableMethodSecurity
+@Configuration // Indique que c'est une classe de configuration Spring
+@EnableMethodSecurity // Permet d'utiliser @PreAuthorize/@Secured dans les services/contrôleurs
 public class SecurityConfig {
 
     private final JwtFilter jwtFilter;
@@ -28,45 +28,46 @@ public class SecurityConfig {
         this.jwtFilter = jwtFilter;
     }
 
-    @Bean
+    @Bean // Bean Spring : encodeur de mots de passe (BCrypt est l’algo recommandé)
     public BCryptPasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
 
-    @Bean
+    @Bean // Définit la config de sécurité principale
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http.csrf(csrf -> csrf.disable());
-        http.cors(cors -> cors.configurationSource(corsConfigurationSource()));
-        http.sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
+        http.csrf(csrf -> csrf.disable()); // désactive la protection CSRF (inutile en API stateless)
+        http.cors(cors -> cors.configurationSource(corsConfigurationSource())); // active CORS
+        http.sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS)); // pas de session HTTP
 
         http.authorizeHttpRequests(auth -> auth
-                // préflight navigateur
+                // Autorise les requêtes "OPTIONS" (préflight CORS)
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-                // public
+                // Endpoints publics
                 .requestMatchers("/api/auth/**", "/h2-console/**", "/ws/**").permitAll()
 
-                // endpoints bonus (auth requis)
+                // Endpoints protégés
                 .requestMatchers("/api/bonus/**").authenticated()
-
-                // blackjack (auth requis ; tu peux mettre hasAnyRole("USER","ADMIN") si tu préfères)
                 .requestMatchers("/api/bj/**").authenticated()
 
-                // le reste
+                // Tout le reste = nécessite d’être connecté
                 .anyRequest().authenticated()
         );
 
+        // Autorise l'affichage H2-console dans un frame (utile en dev)
         http.headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()));
+
+        // Ajoute notre filtre JWT AVANT l’authentification par défaut de Spring
         http.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 
-    @Bean
+    @Bean // Configuration CORS (Angular sur http://localhost:4200 autorisé)
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowCredentials(true);
-        config.setAllowedOrigins(List.of("http://localhost:4200"));
-        config.setAllowedHeaders(List.of("*"));
+        config.setAllowedOrigins(List.of("http://localhost:4200")); // origine autorisée
+        config.setAllowedHeaders(List.of("*")); // tous headers acceptés
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
@@ -74,7 +75,7 @@ public class SecurityConfig {
         return source;
     }
 
-    @Bean
+    @Bean // Fournit l’AuthenticationManager (utilisé par Spring pour authentifier)
     public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
         return config.getAuthenticationManager();
     }
