@@ -10,29 +10,30 @@ import jakarta.annotation.PostConstruct;
 import java.security.SecureRandom;
 import java.util.List;
 
-@Service
+@Service // Service Spring pour le jeu "pile ou face"
 public class CoinFlipService {
-    private volatile double probPile;
-    private final SecureRandom random = new SecureRandom();
+    private volatile double probPile; // probabilité de "pile"
+    private final SecureRandom random = new SecureRandom(); // RNG sécurisé
     private final CoinFlipConfigRepository repo;
 
+    // Constructeur → lit la proba initiale depuis application.properties (par défaut 0.5)
     public CoinFlipService(CoinFlipConfigRepository repo, @Value("${coinflip.probPile:0.5}") double initialProb) {
         this.repo = repo;
         this.probPile = Math.max(0.0, Math.min(1.0, initialProb));
     }
 
-    @PostConstruct
+    @PostConstruct // au démarrage → charge config depuis DB
     public void initFromDb() {
         List<CoinFlipConfig> all = repo.findAll();
         if (all.isEmpty()) {
             CoinFlipConfig cfg = new CoinFlipConfig(probPile);
             repo.save(cfg);
         } else {
-            // prends la première config existante
             this.probPile = all.get(0).getProbPile();
         }
     }
 
+    // Effectue un tirage → "pile" ou "face"
     public String tirer() {
         double v = random.nextDouble();
         return v < probPile ? "pile" : "face";
@@ -40,7 +41,7 @@ public class CoinFlipService {
 
     public double getProbPile() { return probPile; }
 
-    // Persist la nouvelle prob et met à jour la DB (met à jour la première ligne)
+    // Modifie la probabilité et persiste en BDD
     public synchronized void setProbPile(double probPile) {
         this.probPile = Math.max(0.0, Math.min(1.0, probPile));
         List<CoinFlipConfig> all = repo.findAll();

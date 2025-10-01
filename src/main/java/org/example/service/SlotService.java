@@ -13,39 +13,49 @@ import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 
-@Service
+
+@Service // Déclare un service Spring pour la gestion des machines à sous
 public class SlotService {
 
+    // Liste des symboles (par défaut quelques emojis classiques)
     private volatile List<String> symbols = new CopyOnWriteArrayList<>(List.of("🍒", "🍋", "🍊", "⭐", "7️⃣"));
+    // Poids (probabilités) de chaque symbole pour chaque rouleau
     private volatile List<List<Integer>> reelWeights = new CopyOnWriteArrayList<>();
+    // Gains selon les combinaisons (ex: 3 symboles identiques → 10x la mise)
     private volatile LinkedHashMap<Integer, Integer> payouts = new LinkedHashMap<>();
+    // Nombre de rouleaux (3 par défaut)
     private volatile int reelsCount = 3;
 
+    // Générateur aléatoire sécurisé
     private final SecureRandom random = new SecureRandom();
+    // Utilisé pour sérialiser/désérialiser les JSON en BDD
     private final ObjectMapper objectMapper = new ObjectMapper();
+    // Repository pour sauvegarder la config en BDD
     private final SlotConfigRepository repo;
 
+    // Constructeur → initialise repo, poids et gains par défaut
     public SlotService(SlotConfigRepository repo) {
         this.repo = repo;
         resetDefaultWeights();
         resetDefaultPayouts();
     }
 
-    @PostConstruct
+    @PostConstruct // Appelé après la création du bean Spring
     public void initFromDb() {
-        List<SlotConfig> all = repo.findAll();
+        List<SlotConfig> all = repo.findAll(); // récupère les configs depuis la DB
         if (all.isEmpty()) {
-            // persist defaults
-            persistCurrentConfig();
+            persistCurrentConfig(); // si rien en DB → enregistre la config par défaut
             return;
         }
-        SlotConfig cfg = all.get(0);
+        SlotConfig cfg = all.get(0); // prend la première config
+
+        // ----- Lecture JSON (symbols, poids, payouts) -----
         try {
             if (cfg.getSymbolsJson() != null) {
                 List<String> sym = objectMapper.readValue(cfg.getSymbolsJson(), new TypeReference<>() {});
                 if (sym != null && !sym.isEmpty()) this.symbols = new CopyOnWriteArrayList<>(sym);
             }
-        } catch (Exception ex) { /* ignore & keep defaults */ }
+        } catch (Exception ex) { /* ignore & garde defaults */ }
 
         try {
             if (cfg.getReelWeightsJson() != null) {
@@ -59,6 +69,7 @@ public class SlotService {
                 Map<String,Integer> p = objectMapper.readValue(cfg.getPayoutsJson(), new TypeReference<>() {});
                 if (p != null && !p.isEmpty()) {
                     LinkedHashMap<Integer,Integer> map = new LinkedHashMap<>();
+                    // trie par clé décroissante (meilleurs combos d’abord)
                     p.entrySet().stream()
                             .sorted(Map.Entry.<String,Integer>comparingByKey(Comparator.reverseOrder()))
                             .forEach(e -> map.put(Integer.valueOf(e.getKey()), e.getValue()));
@@ -71,11 +82,12 @@ public class SlotService {
             this.reelsCount = cfg.getReelsCount();
         }
 
-        // normalize shapes
+        // S’assure que les poids correspondent bien à la taille des symboles
         ensureWeightsShape();
         if (payouts == null || payouts.isEmpty()) resetDefaultPayouts();
     }
 
+    // ----- Config par défaut -----
     private void resetDefaultWeights() {
         reelWeights.clear();
         for (int r = 0; r < reelsCount; r++) {
@@ -87,18 +99,20 @@ public class SlotService {
 
     private void resetDefaultPayouts() {
         payouts.clear();
-        payouts.put(3, 10);
-        payouts.put(2, 2);
+        payouts.put(3, 10); // 3 symboles identiques = x10
+        payouts.put(2, 2);  // 2 symboles identiques = x2
     }
 
+    // Sauvegarde la config actuelle en DB
     private void persistCurrentConfig() {
         try {
             String symbolsJson = objectMapper.writeValueAsString(this.symbols);
             String reelWeightsJson = objectMapper.writeValueAsString(this.reelWeights);
-            // payouts convert keys to strings for stable JSON
+            // conversions clés integer -> string pour JSON
             Map<String,Integer> payoutsObj = new LinkedHashMap<>();
             for (Map.Entry<Integer,Integer> e : this.payouts.entrySet()) payoutsObj.put(String.valueOf(e.getKey()), e.getValue());
             String payoutsJson = objectMapper.writeValueAsString(payoutsObj);
+
             SlotConfig cfg = new SlotConfig(symbolsJson, reelWeightsJson, payoutsJson, this.reelsCount);
             List<SlotConfig> all = repo.findAll();
             if (all.isEmpty()) repo.save(cfg);
@@ -111,23 +125,23 @@ public class SlotService {
                 repo.save(exist);
             }
         } catch (Exception ex) {
-            // log si tu veux
+            // pourrait être loggé
         }
     }
 
-    // ----- ton code spin / weighted pick / computePayout inchangé -----
-
+    // ----- Tirage -----
     public List<String> spin() {
         ensureWeightsShape();
         List<String> res = new ArrayList<>(reelsCount);
         for (int r = 0; r < reelsCount; r++) {
-            int idx = weightedPickIndex(reelWeights.get(r));
+            int idx = weightedPickIndex(reelWeights.get(r)); // choix pondéré
             if (idx < 0 || idx >= symbols.size()) idx = 0;
             res.add(symbols.get(idx));
         }
         return res;
     }
 
+    // Choix d’un index selon des poids
     private int weightedPickIndex(List<Integer> weights) {
         if (weights == null || weights.isEmpty()) return random.nextInt(symbols.size());
         int total = 0;
@@ -142,6 +156,7 @@ public class SlotService {
         return weights.size() - 1;
     }
 
+    // Calcule le gain selon les combinaisons
     public long computePayout(List<String> reels, long mise) {
         if (reels == null || reels.isEmpty()) return 0L;
         Map<String, Long> counts = reels.stream().collect(Collectors.groupingBy(s->s, Collectors.counting()));
@@ -157,7 +172,7 @@ public class SlotService {
         return 0L;
     }
 
-    // admin update : applique et persiste
+    // Mise à jour admin (avec persistance)
     public synchronized void updateConfig(List<String> newSymbols,
                                           List<List<Integer>> newReelWeights,
                                           Integer newReelsCount,
@@ -189,10 +204,10 @@ public class SlotService {
             this.payouts = copy;
         }
 
-        // persist updated config
         persistCurrentConfig();
     }
 
+    // ----- Getters sécurisés -----
     public synchronized List<String> getSymbols() { return new ArrayList<>(symbols); }
     public synchronized List<List<Integer>> getReelWeights() { return reelWeights.stream().map(ArrayList::new).collect(Collectors.toList()); }
     public synchronized Map<Integer,Integer> getPayouts() { return new LinkedHashMap<>(payouts); }

@@ -11,31 +11,35 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 
-@Service
+@Service // Indique que c'est une classe de service Spring
 public class UtilisateurService {
     @Autowired
     private UtilisateurRepository utilisateurRepo;
     @Autowired
     private WalletRepository walletRepo;
+
+    // BCrypt pour hacher les mots de passe
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
-    @Transactional
+    @Transactional // Garantit que tout s'exécute dans une transaction
     public Utilisateur inscrire(String email, String pseudo, String motDePassePlain) {
+        // Hachage du mot de passe
         String hash = passwordEncoder.encode(motDePassePlain);
 
-        // création de l'utilisateur via le builder (compatible avec Lombok @Builder)
+        // Création de l’objet utilisateur avec Lombok Builder
         Utilisateur u = Utilisateur.builder()
                 .email(email)
                 .pseudo(pseudo)
                 .motDePasseHash(hash)
                 .dateCreation(LocalDateTime.now())
                 .active(true)
-                .role("USER") // par défaut
+                .role("USER") // rôle par défaut
                 .build();
 
+        // Sauvegarde en BDD
         Utilisateur saved = utilisateurRepo.save(u);
 
-        // créer wallet initial avec 1000 crédits (via builder si Wallet utilise Lombok)
+        // Création d’un portefeuille initial avec 1000 crédits
         Wallet w = Wallet.builder()
                 .utilisateur(saved)
                 .solde(1000L)
@@ -45,10 +49,12 @@ public class UtilisateurService {
         return saved;
     }
 
+    // Recherche d'un utilisateur par email
     public Utilisateur trouverParEmail(String email){
         return utilisateurRepo.findByEmail(email).orElse(null);
     }
 
+    // Vérification du mot de passe avec BCrypt
     public boolean verifierMotDePasse(Utilisateur utilisateur, String motDePassePlain) {
         return passwordEncoder.matches(motDePassePlain, utilisateur.getMotDePasseHash());
     }
