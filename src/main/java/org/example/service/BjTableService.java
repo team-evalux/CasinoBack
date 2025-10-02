@@ -148,7 +148,7 @@ public class BjTableService {
                 if (s.getStatus() != SeatStatus.DISCONNECTED) return;
 
                 // Ne supprimer le siège que si la table est dans un état sûr (pas mid-hand)
-                if (t.getPhase() == TablePhase.WAITING_FOR_PLAYERS || t.getPhase() == TablePhase.PAYOUT) {
+                if (t.getPhase() == TablePhase.BETTING || t.getPhase() == TablePhase.PAYOUT) {
                     t.getSeats().put(seatIndex, new Seat());
                     userTable.remove(email);
                     disconnectTimers.remove(email);
@@ -211,7 +211,7 @@ public class BjTableService {
 
         // create runtime object with DB id
         BjTable t = new BjTable(saved.getId(), Math.max(2, Math.min(7, maxSeats)), isPrivate, code);
-        t.setPhase(TablePhase.WAITING_FOR_PLAYERS);
+        t.setPhase(TablePhase.BETTING);
         t.setPhaseDeadlineEpochMs(5L);
         t.setCurrentSeatIndex(null);
         t.setCreatorEmail(creatorEmail);
@@ -361,7 +361,7 @@ public class BjTableService {
         userTable.put(email, t.getId());
         cancelDisconnectTimer(email);
 
-        if (t.getPhase() == TablePhase.WAITING_FOR_PLAYERS) {
+        if (t.getPhase() == TablePhase.BETTING) {
             goBetting(t);
         } else {
             broadcastState(t);
@@ -534,7 +534,7 @@ public class BjTableService {
             }
         }
         if (!aDesMises) {
-            t.setPhase(TablePhase.WAITING_FOR_PLAYERS);
+            t.setPhase(TablePhase.BETTING);
             broadcastState(t);
             goBetting(t);
             return;
@@ -710,7 +710,7 @@ public class BjTableService {
                 for (Seat s : t.getSeats().values()) s.resetForNextHand();
                 t.getDealer().getCards().clear();
 
-                t.setPhase(TablePhase.WAITING_FOR_PLAYERS);
+                t.setPhase(TablePhase.BETTING);
                 t.setPhaseDeadlineEpochMs(null);
                 broadcastState(t);
                 broadcastLobby();

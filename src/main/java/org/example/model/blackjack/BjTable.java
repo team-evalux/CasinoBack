@@ -16,7 +16,7 @@ public class BjTable {
     private final Map<Integer, Seat> seats = new HashMap<>();
     private final Shoe shoe = new Shoe(6);
 
-    private TablePhase phase = TablePhase.WAITING_FOR_PLAYERS;
+    private TablePhase phase = TablePhase.BETTING;
 
     // dealer
     private final PlayerState dealer = new PlayerState();

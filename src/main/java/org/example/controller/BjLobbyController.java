@@ -25,7 +25,7 @@ public class BjLobbyController {
             row.put("id",           t.getId());
             row.put("maxSeats",     t.getMaxSeats());
             row.put("isPrivate",    t.isPrivate());
-            row.put("phase",        t.getPhase() != null ? t.getPhase().name() : "WAITING_FOR_PLAYERS");
+            row.put("phase",        t.getPhase() != null ? t.getPhase().name() : "BETTING");
             row.put("name",         t.getName());
             row.put("minBet",       t.getMinBet());
             row.put("maxBet",       t.getMaxBet());
