@@ -78,12 +78,12 @@ public class BjLobbyController {
                 out.put("code", t.getCode());
             }
             return ResponseEntity.ok(out);
-        } catch (IllegalArgumentException iae) {
-            return ResponseEntity.badRequest().body(Map.of("error", iae.getMessage()));
-        } catch (Exception ex) {
-            return ResponseEntity.status(500).body(Map.of("error", "Erreur serveur lors de la création"));
-        }
+        }  catch (IllegalStateException ise) {
+        return ResponseEntity.badRequest().body(Map.of("error", ise.getMessage()));
+    } catch (IllegalArgumentException iae) {
+        return ResponseEntity.badRequest().body(Map.of("error", iae.getMessage()));
     }
+}
 
     @DeleteMapping("/table/{id}")
     public ResponseEntity<?> close(@PathVariable Long id, Principal principal) {

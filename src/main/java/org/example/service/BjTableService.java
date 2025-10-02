@@ -192,6 +192,16 @@ public class BjTableService {
      */
     public synchronized BjTable createTable(String creatorEmail, boolean isPrivate, String code, int maxSeats,
                                             String name, long minBet, long maxBet) {
+
+        if (creatorEmail != null) {
+            // Vérifie si l'utilisateur a déjà une table
+            for (BjTable existing : tables.values()) {
+                if (creatorEmail.equals(existing.getCreatorEmail())) {
+                    throw new IllegalStateException("Vous possédez déjà une table. Fermez-la avant d'en créer une nouvelle.");
+                }
+            }
+        }
+
         if (isPrivate && (code == null || code.isBlank())) {
             throw new IllegalArgumentException("Code requis pour une table privée");
         }
