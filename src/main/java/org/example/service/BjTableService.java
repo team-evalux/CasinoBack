@@ -273,31 +273,90 @@ public class BjTableService {
         long minBet = (msg.getMinBet() != null) ? msg.getMinBet() : 0L;
         long maxBet = (msg.getMaxBet() != null) ? msg.getMaxBet() : 0L;
 
+        // --- Création table publique
         if (Boolean.TRUE.equals(msg.getCreatePublic())) {
             return createTable(email, false, null, maxSeats, name, minBet, maxBet);
         }
+
+        // --- Création table privée
         if (Boolean.TRUE.equals(msg.getCreatePrivate())) {
             if (msg.getCode() == null || msg.getCode().isBlank()) {
                 throw new IllegalArgumentException("Code requis pour créer une table privée");
             }
             return createTable(email, true, msg.getCode(), maxSeats, name, minBet, maxBet);
         }
+
+        // --- Rejoindre une table existante
         if (msg.getTableId() != null) {
             BjTable t = mustTable(msg.getTableId());
+
+            // Vérification code privé
             if (t.isPrivate()) {
                 if (msg.getCode() == null || !Objects.equals(msg.getCode(), t.getCode())) {
                     throw new IllegalStateException("Code d'accès invalide pour cette table privée");
                 }
-                if (email != null) {
-                    privateAccess.computeIfAbsent(t.getId(), k -> ConcurrentHashMap.newKeySet()).add(email);
+                privateAccess.computeIfAbsent(t.getId(), k -> ConcurrentHashMap.newKeySet()).add(email);
+            }
+
+            // ✅ Vérifie si déjà assis (évite les doublons, surtout pour le créateur)
+            boolean dejaAssis = t.getSeats().values().stream()
+                    .anyMatch(s -> email.equals(s.getEmail()));
+            if (!dejaAssis) {
+                // 🧠 Auto-assise en ordre croissant
+                Seat assignedSeat = null;
+                for (int i = 0; i < t.getMaxSeats(); i++) {
+                    Seat s = t.getSeats().get(i);
+                    if (s == null || s.getStatus() == SeatStatus.EMPTY) {
+                        Utilisateur u = utilisateurRepo.findByEmail(email).orElseThrow();
+                        Seat newSeat = new Seat();
+                        newSeat.setUserId(u.getId());
+                        newSeat.setEmail(email);
+                        newSeat.setStatus(SeatStatus.SEATED);
+                        t.getSeats().put(i, newSeat);
+                        userTable.put(email, t.getId());
+                        assignedSeat = newSeat;
+                        break;
+                    }
+                }
+                if (assignedSeat == null) {
+                    throw new IllegalStateException("Aucun siège disponible sur cette table.");
                 }
             }
+
+            broadcastState(t);
+            broadcastLobby();
             return t;
         }
 
-        return listPublicTables().stream().findFirst()
+        // --- Sinon, rejoindre ou créer une table publique par défaut
+        BjTable table = listPublicTables().stream().findFirst()
                 .orElseGet(() -> createTable(email, false, null, 5, null, 0L, 0L));
+
+        // ✅ Même protection ici
+        boolean dejaAssis = table.getSeats().values().stream()
+                .anyMatch(s -> email.equals(s.getEmail()));
+        if (!dejaAssis) {
+            for (int i = 0; i < table.getMaxSeats(); i++) {
+                Seat s = table.getSeats().get(i);
+                if (s == null || s.getStatus() == SeatStatus.EMPTY) {
+                    Utilisateur u = utilisateurRepo.findByEmail(email).orElseThrow();
+                    Seat newSeat = new Seat();
+                    newSeat.setUserId(u.getId());
+                    newSeat.setEmail(email);
+                    newSeat.setStatus(SeatStatus.SEATED);
+                    table.getSeats().put(i, newSeat);
+                    userTable.put(email, table.getId());
+                    break;
+                }
+            }
+        }
+
+        broadcastState(table);
+        broadcastLobby();
+        return table;
     }
+
+
 
     /**
      * Méthode publique pratique : autorise un email pour une table si le code correspond.
