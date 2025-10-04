@@ -33,6 +33,16 @@ public class BjTable {
     private Long    minBet;
     private Long    maxBet;
 
+    private boolean pendingClose = false;
+
+    public boolean isPendingClose() {
+        return pendingClose;
+    }
+    public void setPendingClose(boolean pendingClose) {
+        this.pendingClose = pendingClose;
+    }
+
+
     // constructeur : id peut être null (on récupère l'id DB si présent)
     public BjTable(Long id, int maxSeats, boolean isPrivate, String code) {
         this.id = id;

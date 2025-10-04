@@ -720,14 +720,40 @@ public class BjTableService {
                 for (Seat s : t.getSeats().values()) s.resetForNextHand();
                 t.getDealer().getCards().clear();
 
+                if (t.isPendingClose()) {
+                    doCloseNow(t.getId(), t);
+                    return;
+                }
+
+
                 t.setPhase(TablePhase.BETTING);
-                t.setPhaseDeadlineEpochMs(null);
+                t.setPhaseDeadlineEpochMs(Instant.now().toEpochMilli() + BETTING_MS);
                 broadcastState(t);
                 broadcastLobby();
 
                 goBetting(t);
             }
         }, RESULT_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private void doCloseNow(Long tableId, BjTable t) {
+
+        broadcast(t, "TABLE_CLOSED", Map.of(
+                "msg", "La table a été fermée par le créateur"
+        ));
+
+        for (Seat s : t.getSeats().values()) {
+            if (s.getEmail() != null) {
+                userTable.remove(s.getEmail());
+                cancelDisconnectTimer(s.getEmail());
+            }
+        }
+        tables.remove(tableId);
+        privateAccess.remove(tableId);
+
+        try { bjTableRepository.deleteById(tableId); } catch (Exception ignored) {}
+
+        broadcastLobby();
     }
 
 
@@ -743,18 +769,31 @@ public class BjTableService {
         }
         if (!allowed) throw new IllegalStateException("Seul le créateur ou un ADMIN peut fermer la table");
 
-        for (Seat s : t.getSeats().values()) {
-            if (s.getEmail() != null) {
-                userTable.remove(s.getEmail());
-                cancelDisconnectTimer(s.getEmail());
+        // 🚨 Cas spécial : si on est en phase BETTING → on annule tout
+        if (t.getPhase() == TablePhase.BETTING) {
+            // on réinitialise les sièges (kick tout le monde)
+            for (Seat s : t.getSeats().values()) {
+                if (s.getEmail() != null) {
+                    userTable.remove(s.getEmail());
+                    cancelDisconnectTimer(s.getEmail());
+                }
             }
+            t.getSeats().clear(); // reset complet
+            doCloseNow(tableId, t); // fermeture immédiate
+            return;
         }
-        tables.remove(tableId);
-        privateAccess.remove(tableId);
 
-        // supprime en base
-        try { bjTableRepository.deleteById(tableId); } catch (Exception ignored) {}
+        // ⚠️ Si une manche est en cours → on attend la fin (comme avant)
+        if (t.getPhase() == TablePhase.PLAYING
+                || t.getPhase() == TablePhase.DEALER_TURN
+                || t.getPhase() == TablePhase.PAYOUT) {
+            t.setPendingClose(true);
+            return;
+        }
 
-        broadcastLobby();
+        // Sinon fermeture immédiate
+        doCloseNow(tableId, t);
     }
+
+
 }
