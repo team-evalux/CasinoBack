@@ -1,4 +1,3 @@
-// src/main/java/org/example/security/JwtChannelInterceptor.java
 package org.example.security;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,16 +8,27 @@ import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
+/**
+ * Intercepteur STOMP pour authentifier la connexion WebSocket via JWT.
+ * - Rejette le CONNECT si token absent ou invalide (lancer une exception provoque la fermeture du handshake).
+ * - Charge UserDetails pour attacher les autorités (authorities) à l'Authentication.
+ */
 @Component
 public class JwtChannelInterceptor implements ChannelInterceptor {
 
     @Autowired
     private JwtUtil jwtUtil;
+
+    @Autowired
+    private UserDetailsService userDetailsService;
 
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {
@@ -29,33 +39,34 @@ public class JwtChannelInterceptor implements ChannelInterceptor {
         try {
             if (StompCommand.CONNECT.equals(acc.getCommand())) {
                 String token = extractToken(acc);
-                if (token != null && jwtUtil.validerToken(token)) {
-                    String email = jwtUtil.extraireSubject(token);
-                    // créer un Principal simple avec le nom = email
-                    var auth = new UsernamePasswordAuthenticationToken(email, null, List.of());
-                    acc.setUser(auth);
-                    // pour le contexte Spring Security (utile si tu utilises des méthodes sécurisées)
-                    SecurityContextHolder.getContext().setAuthentication(auth);
-                    System.out.println("WebSocket CONNECT - user set for session " + acc.getSessionId() + " -> " + email);
-                } else {
-                    System.out.println("WebSocket CONNECT - no/invalid token for session " + acc.getSessionId());
+                if (token == null || !jwtUtil.validerToken(token)) {
+                    // Rejette la tentative de connexion : Spring/ broker retournera une erreur au client
+                    throw new IllegalArgumentException("Invalid or missing JWT token");
                 }
+                String email = jwtUtil.extraireSubject(token);
+                // charge UserDetails pour récupérer authorities
+                UserDetails ud = userDetailsService.loadUserByUsername(email);
+                Authentication auth = new UsernamePasswordAuthenticationToken(ud, null, ud.getAuthorities());
+                acc.setUser(auth);
+                // aussi dans le contexte Spring Security (utile pour @PreAuthorize dans handlers)
+                SecurityContextHolder.getContext().setAuthentication(auth);
+                System.out.println("WebSocket CONNECT - authenticated session " + acc.getSessionId() + " -> " + email);
             } else {
                 // pour les autres trames, restaurer le contexte si le user est présent
                 var user = acc.getUser();
-                if (user != null) {
-                    SecurityContextHolder.getContext().setAuthentication(
-                            new UsernamePasswordAuthenticationToken(user.getName(), null, List.of())
-                    );
+                if (user instanceof Authentication a) {
+                    SecurityContextHolder.getContext().setAuthentication(a);
                 } else {
                     SecurityContextHolder.clearContext();
                 }
             }
-            // renvoyer le message avec le headers modifiés
+            // renvoyer le message avec les headers modifiés
             return MessageBuilder.createMessage(message.getPayload(), acc.getMessageHeaders());
-        } catch (Exception ex) {
-            // en cas d'erreur ne casse pas la connexion, renvoie le message original
-            return message;
+        } catch (RuntimeException ex) {
+            // on propage l'exception pour que le broker refuse le CONNECT ou loggue une erreur.
+            throw ex;
+        } finally {
+            // note: ne pas clear context ici car appelant suivant peut en avoir besoin dans la même thread
         }
     }
 

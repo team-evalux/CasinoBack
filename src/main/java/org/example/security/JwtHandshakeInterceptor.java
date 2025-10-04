@@ -2,6 +2,7 @@
 package org.example.security;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.server.ServletServerHttpRequest;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
@@ -10,23 +11,28 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.server.HandshakeInterceptor;
 
+import java.io.IOException;
 import java.util.Map;
 
 @Component
 public class JwtHandshakeInterceptor implements HandshakeInterceptor {
 
+    private final JwtUtil jwtUtil;
+
+    public JwtHandshakeInterceptor(JwtUtil jwtUtil) {
+        this.jwtUtil = jwtUtil;
+    }
+
     @Override
     public boolean beforeHandshake(ServerHttpRequest request,
                                    ServerHttpResponse response,
                                    WebSocketHandler wsHandler,
-                                   Map<String, Object> attributes) {
+                                   Map<String, Object> attributes) throws IOException {
         if (request instanceof ServletServerHttpRequest http) {
             HttpServletRequest req = http.getServletRequest();
 
-            // 1) token via query param ?token=...
+            // 1) Récupère le token dans l’ordre de priorité
             String token = req.getParameter("token");
-
-            // 2) sinon header Authorization: Bearer ...
             if (token == null) {
                 String auth = req.getHeader("Authorization");
                 if (auth != null && auth.startsWith("Bearer ")) {
@@ -34,12 +40,18 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
                 }
             }
 
-            // 3) stocker dans les attributes de session WS pour usage ultérieur
-            if (token != null && !token.isBlank()) {
-                attributes.put("token", token);
+            // 2) Vérifie la validité
+            if (token == null || token.isBlank() || !jwtUtil.validerToken(token)) {
+                System.out.println("❌ Rejet WS: token manquant ou invalide depuis " + req.getRemoteAddr());
+                response.setStatusCode(HttpStatus.UNAUTHORIZED);
+                response.getBody().write("Unauthorized WebSocket connection".getBytes());
+                return false; // ⛔ stoppe la connexion
             }
+            // 3) Stocke le token dans la session WS (utilisable plus tard)
+            attributes.put("token", token);
         }
-        return true; // poursuivre le handshake
+
+        return true;
     }
 
     @Override
@@ -47,6 +59,5 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
                                ServerHttpResponse response,
                                WebSocketHandler wsHandler,
                                @Nullable Exception ex) {
-        // rien à faire
     }
 }

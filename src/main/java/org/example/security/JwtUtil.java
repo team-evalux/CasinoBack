@@ -5,13 +5,37 @@ import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import javax.annotation.PostConstruct;
 import java.security.Key;
+import java.util.Base64;
 import java.util.Date;
 
+/**
+ * Utilitaire JWT.
+ * Le secret doit être fourni via la propriété "jwt.secret" (BASE64 encoded key).
+ * Exemple (application.properties):
+ *   jwt.secret=BASE64_ENCODED_32_BYTES_KEY
+ *   jwt.expiration-ms=86400000
+ */
 @Component
 public class JwtUtil {
-    private final Key key = Keys.secretKeyFor(SignatureAlgorithm.HS256);
-    private long jwtExpirationMs = 86400000;
+
+    private Key key;
+
+    @Value("${jwt.secret:}")
+    private String jwtSecretBase64;
+
+    @Value("${jwt.expiration-ms:86400000}")
+    private long jwtExpirationMs;
+
+    @PostConstruct
+    public void init() {
+        if (jwtSecretBase64 == null || jwtSecretBase64.isBlank()) {
+            throw new IllegalStateException("jwt.secret must be set (base64).");
+        }
+        byte[] keyBytes = Base64.getDecoder().decode(jwtSecretBase64);
+        this.key = Keys.hmacShaKeyFor(keyBytes);
+    }
 
     public String genererToken(String subject){
         Date now = new Date();
@@ -37,4 +61,3 @@ public class JwtUtil {
         }
     }
 }
-
