@@ -262,6 +262,27 @@ public class BjTableService {
             throw new IllegalArgumentException("Code requis pour une table privée");
         }
 
+        // ✅ Limitation du nom à 10 caractères
+        if (name != null) {
+            name = name.trim();
+            if (name.length() > 10) {
+                name = name.substring(0, 10);
+            }
+        }
+
+        // ✅ Si aucun nom fourni, on met "Table de <pseudo>"
+        if (name == null || name.isBlank()) {
+            String pseudo = utilisateurRepo.findByEmail(creatorEmail)
+                    .map(Utilisateur::getPseudo)
+                    .orElseGet(() -> {
+                        int at = creatorEmail != null ? creatorEmail.indexOf('@') : -1;
+                        return at > 0 ? creatorEmail.substring(0, at) : "Inconnu";
+                    });
+            name = "Table de " + pseudo;
+            // on tronque encore une fois si le pseudo est trop long
+            if (name.length() > 20) name = name.substring(0, 20);
+        }
+
         // persist entity
         BjTableEntity ent = new BjTableEntity();
         ent.setPrivate(isPrivate);
@@ -285,15 +306,16 @@ public class BjTableService {
         t.setName(name);
         t.setMinBet(minBet);
         t.setMaxBet(maxBet);
+        t.setLastActiveAt(Instant.now());
 
         tables.put(t.getId(), t);
 
-        // autorise automatiquement le créateur pour les privées
+        // autorise automatiquement le créateur pour les tables privées
         if (isPrivate && creatorEmail != null) {
             privateAccess.computeIfAbsent(t.getId(), k -> ConcurrentHashMap.newKeySet()).add(creatorEmail);
         }
 
-        // assise automatique du createur
+        // assise automatique du créateur
         if (creatorEmail != null) {
             utilisateurRepo.findByEmail(creatorEmail).ifPresent(u -> {
                 Seat seat0 = t.getSeats().get(0);
