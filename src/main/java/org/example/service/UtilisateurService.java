@@ -49,6 +49,11 @@ public class UtilisateurService {
         return utilisateurRepo.findByEmail(email).orElse(null);
     }
 
+    public Utilisateur trouverParPseudo(String pseudo){
+        return utilisateurRepo.findByPseudo(pseudo).orElse(null);
+    }
+
+
     public boolean verifierMotDePasse(Utilisateur utilisateur, String motDePassePlain) {
         return passwordEncoder.matches(motDePassePlain, utilisateur.getMotDePasseHash());
     }

@@ -31,6 +31,9 @@ public class AuthController {
         if (utilisateurService.trouverParEmail(req.email) != null) {
             return ResponseEntity.badRequest().body(Map.of("error","Email déjà utilisé"));
         }
+        if (utilisateurService.trouverParPseudo(req.pseudo) != null) {
+            return ResponseEntity.badRequest().body(Map.of("error","Pseudo déjà utilisé"));
+        }
         verificationService.envoyerCode(req.email, VerificationCode.Type.REGISTER);
         return ResponseEntity.ok(Map.of("message", "Code envoyé à " + req.email));
     }
@@ -41,12 +44,18 @@ public class AuthController {
     public ResponseEntity<?> verifierCodeEtInscrire(@RequestBody RegisterRequest req) {
         boolean ok = verificationService.verifierCode(req.email, req.code, VerificationCode.Type.REGISTER);
         if (!ok) {
-            return ResponseEntity.badRequest().body("Code invalide ou expiré");
-        }
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "Code invalide ou expiré"
+            ));        }
         Utilisateur u = utilisateurService.inscrire(req.email, req.pseudo, req.motDePasse);
         String token = jwtUtil.genererToken(u.getEmail());
-        return ResponseEntity.ok(new AuthResponse(token, u.getEmail(), u.getPseudo(), u.getRole()));
-    }
+        return ResponseEntity.ok(Map.of(
+                "token", token,
+                "email", u.getEmail(),
+                "pseudo", u.getPseudo(),
+                "role", u.getRole(),
+                "message", "Inscription réussie et vérifiée"
+        ));    }
 
     // --- Mot de passe oublié ---
     @PostMapping("/forgot/send-code")
