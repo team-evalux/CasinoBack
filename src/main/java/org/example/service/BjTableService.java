@@ -9,8 +9,10 @@ import org.example.model.blackjack.*;
 import org.example.repo.BjTableRepository;
 import org.example.repo.UtilisateurRepository;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
@@ -317,6 +319,11 @@ public class BjTableService {
         return out;
     }
 
+    private void markActive(BjTable t) {
+        t.setLastActiveAt(Instant.now());
+    }
+
+
     /**
      * Si msg.tableId est fourni et que la table est privée, on exige le code et on autorise l'email si OK.
      * Si createPrivate=true on exige un code non vide (création).
@@ -343,6 +350,7 @@ public class BjTableService {
         // --- Rejoindre une table existante
         if (msg.getTableId() != null) {
             BjTable t = mustTable(msg.getTableId());
+            markActive(t);
 
             // Vérification code privé
             if (t.isPrivate()) {
@@ -441,6 +449,7 @@ public class BjTableService {
         }
 
         BjTable t = mustTable(tableId);
+        markActive(t);
 
         // Si table privée, vérifier que l'email est autorisé (créateur ou a fourni le bon code précédemment)
         if (t.isPrivate()) {
@@ -495,6 +504,7 @@ public class BjTableService {
 
     public synchronized void bet(String email, BetMsg msg) {
         BjTable t = mustTable(msg.getTableId());
+        markActive(t);
         if (t.getPhase() != TablePhase.BETTING) {
             throw new IllegalStateException("Hors phase BETTING");
         }
@@ -581,6 +591,7 @@ public class BjTableService {
 
     public synchronized void leave(String email, Long tableId, Integer seatIndex) {
         BjTable t = mustTable(tableId);
+        markActive(t);
         if (seatIndex != null) {
             Seat seat = t.getSeats().get(seatIndex);
             if (seat != null && Objects.equals(seat.getEmail(), email)) {
@@ -907,6 +918,30 @@ public class BjTableService {
 
         // Sinon fermeture immédiate
         doCloseNow(tableId, t);
+    }
+
+    @Scheduled(fixedRate = 600_000) // toutes les 60 secondes
+    public synchronized void nettoyerTablesInactives() {
+        Instant now = Instant.now();
+        List<Long> toRemove = new ArrayList<>();
+
+        for (BjTable t : tables.values()) {
+            boolean vide = t.getSeats().values().stream()
+                    .allMatch(s -> s == null || s.getStatus() == SeatStatus.EMPTY);
+
+            // Si table vide depuis plus d'une minute
+            if (vide && Duration.between(t.getLastActiveAt(), now).toMillis() > 60_000) {
+                toRemove.add(t.getId());
+            }
+        }
+
+        for (Long id : toRemove) {
+            BjTable t = tables.get(id);
+            if (t != null) {
+                System.out.println("🧹 Suppression automatique de la table " + id + " (inactive depuis > 1min)");
+                doCloseNow(id, t);
+            }
+        }
     }
 
 

@@ -34,6 +34,7 @@ public class BjTable {
     private Long    maxBet;
 
     private boolean pendingClose = false;
+    private Instant lastActiveAt = Instant.now();
 
     public boolean isPendingClose() {
         return pendingClose;
