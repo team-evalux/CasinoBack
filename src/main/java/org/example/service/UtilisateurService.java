@@ -52,4 +52,13 @@ public class UtilisateurService {
     public boolean verifierMotDePasse(Utilisateur utilisateur, String motDePassePlain) {
         return passwordEncoder.matches(motDePassePlain, utilisateur.getMotDePasseHash());
     }
+
+    @Transactional
+    public void mettreAJourMotDePasse(String email, String nouveauMotDePasse) {
+        Utilisateur u = utilisateurRepo.findByEmail(email)
+                .orElseThrow(() -> new IllegalArgumentException("Utilisateur introuvable"));
+        u.setMotDePasseHash(passwordEncoder.encode(nouveauMotDePasse));
+        utilisateurRepo.save(u);
+    }
+
 }
