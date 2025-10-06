@@ -57,6 +57,57 @@ public class BjTableService {
         return out;
     }
 
+    // Helper: affiche le pseudo si on trouve l'utilisateur, sinon fallback sur la partie locale de l'email ou null
+    private String displayNameForEmail(String email) {
+        if (email == null) return null;
+        try {
+            return utilisateurRepo.findByEmail(email)
+                    .map(u -> u.getPseudo())
+                    .orElseGet(() -> {
+                        int at = email.indexOf('@');
+                        return at > 0 ? email.substring(0, at) : email;
+                    });
+        } catch (Exception ex) {
+            int at = email.indexOf('@');
+            return at > 0 ? email.substring(0, at) : email;
+        }
+    }
+
+    // Helper: transforme la Map<Integer,Seat> en Map<Integer, Map<String,Object>> serialisable,
+// en ajoutant "displayName" pour chaque siège.
+    private Map<Integer, Map<String, Object>> seatsPayload(BjTable t) {
+        Map<Integer, Map<String,Object>> out = new LinkedHashMap<>();
+        for (Map.Entry<Integer, Seat> e : t.getSeats().entrySet()) {
+            Integer idx = e.getKey();
+            Seat s = e.getValue();
+            Map<String,Object> seatMap = new LinkedHashMap<>();
+            if (s != null) {
+                seatMap.put("userId", s.getUserId());
+                seatMap.put("email", s.getEmail());
+                seatMap.put("displayName", displayNameForEmail(s.getEmail()));
+                seatMap.put("status", s.getStatus() != null ? s.getStatus().name() : null);
+                // hand
+                Map<String,Object> handMap = new LinkedHashMap<>();
+                handMap.put("cards", s.getHand().getCards());
+                handMap.put("standing", s.getHand().isStanding());
+                handMap.put("busted", s.getHand().isBusted());
+                handMap.put("blackjack", s.getHand().isBlackjack());
+                handMap.put("bet", s.getHand().getBet());
+                handMap.put("total", s.getHand().bestTotal());
+                seatMap.put("hand", handMap);
+            } else {
+                seatMap.put("userId", null);
+                seatMap.put("email", null);
+                seatMap.put("displayName", null);
+                seatMap.put("status", "EMPTY");
+                seatMap.put("hand", Map.of("cards", List.of(), "standing", false, "busted", false, "blackjack", false, "bet", 0, "total", 0));
+            }
+            out.put(idx, seatMap);
+        }
+        return out;
+    }
+
+
     private void broadcast(BjTable t, String type, Object payload) {
         TableEvent ev = TableEvent.builder().type(type).payload(payload).build();
         if (!t.isPrivate()) {
@@ -78,11 +129,12 @@ public class BjTableService {
                 "tableId",          t.getId(),
                 "phase",            t.getPhase(),
                 "deadline",         t.getPhaseDeadlineEpochMs(),
-                "seats",            t.getSeats(),
+                "seats",            seatsPayload(t),
                 "dealer",           t.getDealer(),
                 "currentSeatIndex", t.getCurrentSeatIndex(),
                 "isPrivate",        t.isPrivate(),
                 "creatorEmail",     t.getCreatorEmail(),
+                "creatorDisplayName", displayNameForEmail(t.getCreatorEmail()),
                 "name",             t.getName(),
                 "minBet",           t.getMinBet(),
                 "maxBet",           t.getMaxBet()
@@ -104,11 +156,13 @@ public class BjTableService {
                     "name",         t.getName(),
                     "minBet",       t.getMinBet(),
                     "maxBet",       t.getMaxBet(),
-                    "creatorEmail", t.getCreatorEmail()   // ✅ maintenant exposé
+                    "creatorEmail", t.getCreatorEmail(),
+                    "creatorDisplayName", displayNameForEmail(t.getCreatorEmail())
             ));
         }
         broker.convertAndSend("/topic/bj/lobby", list);
     }
+
 
     private BjTable mustTable(Long id) {
         BjTable t = tables.get(id);
@@ -630,7 +684,7 @@ public class BjTableService {
         broadcast(t, "HAND_START", m(
                 "dealerUp", !t.getDealer().getCards().isEmpty() ? t.getDealer().getCards().get(0) : null,
                 "deadline", t.getPhaseDeadlineEpochMs(),
-                "players",  t.getSeats()
+                "players",  seatsPayload(t)
         ));
 
         if (t.getCurrentSeatIndex() == null) dealerTurn(t);
@@ -760,18 +814,19 @@ public class BjTableService {
 
         // envoie aussi TABLE_STATE sans code
         broadcast(t, "TABLE_STATE", m(
-                "tableId",          t.getId(),
-                "phase",            t.getPhase(),
-                "deadline",         t.getPhaseDeadlineEpochMs(),
-                "seats",            t.getSeats(),
-                "dealer",           t.getDealer(),
-                "currentSeatIndex", t.getCurrentSeatIndex(),
-                "isPrivate",        t.isPrivate(),
-                "creatorEmail",     t.getCreatorEmail(),
-                "name",             t.getName(),
-                "minBet",           t.getMinBet(),
-                "maxBet",           t.getMaxBet(),
-                "lastPayouts",      pay
+                "tableId",            t.getId(),
+                "phase",              t.getPhase(),
+                "deadline",           t.getPhaseDeadlineEpochMs(),
+                "seats",              seatsPayload(t),
+                "dealer",             t.getDealer(),
+                "currentSeatIndex",   t.getCurrentSeatIndex(),
+                "isPrivate",          t.isPrivate(),
+                "creatorEmail",       t.getCreatorEmail(),
+                "creatorDisplayName", displayNameForEmail(t.getCreatorEmail()),
+                "name",               t.getName(),
+                "minBet",             t.getMinBet(),
+                "maxBet",             t.getMaxBet(),
+                "lastPayouts",        pay
         ));
 
         scheduler.schedule(() -> {
