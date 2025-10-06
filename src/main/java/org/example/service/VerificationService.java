@@ -3,6 +3,7 @@ package org.example.service;
 import org.example.model.VerificationCode;
 import org.example.repo.VerificationCodeRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -48,5 +49,10 @@ public class VerificationService {
                 .filter(vc -> vc.getExpiration().isAfter(LocalDateTime.now()))
                 .filter(vc -> vc.getCode().equals(code))
                 .isPresent();
+    }
+
+    @Scheduled(fixedRate = 60000) // 600000 ms = 10 minutes
+    public void supprimerCodesExpirés() {
+        repo.deleteByExpirationBefore(LocalDateTime.now());
     }
 }
