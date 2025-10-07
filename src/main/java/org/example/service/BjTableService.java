@@ -25,6 +25,7 @@ public class BjTableService {
     private final UtilisateurRepository utilisateurRepo;
     private final BjTableRepository bjTableRepository;
     private final SimpMessagingTemplate broker;
+    private final GameHistoryService historyService;
 
     // runtime tables (id DB -> runtime object)
     private final Map<Long, BjTable> tables = new ConcurrentHashMap<>();
@@ -789,7 +790,6 @@ public class BjTableService {
     private void payouts(BjTable t) {
         int dealerTotal = t.getDealer().bestTotal();
         boolean dealerBust = dealerTotal > 21;
-
         List<Map<String, Object>> pay = new ArrayList<>();
 
         for (Map.Entry<Integer,Seat> e : t.getSeats().entrySet()) {
@@ -799,7 +799,6 @@ public class BjTableService {
 
             long credit = 0;
             int total = s.getHand().bestTotal();
-
             String outcome;
 
             if (s.getHand().isBusted()) {
@@ -830,54 +829,48 @@ public class BjTableService {
                 walletService.crediter(u, credit);
             }
 
+            // ✅ Enregistrement historique
+            try {
+                Utilisateur u = utilisateurRepo.findByEmail(s.getEmail()).orElseThrow();
+                int multiplier = switch (outcome) {
+                    case "BLACKJACK" -> 3;
+                    case "WIN" -> 2;
+                    case "PUSH" -> 1;
+                    default -> 0;
+                };
+                historyService.record(
+                        u,
+                        "blackjack",
+                        "total=" + total + ",outcome=" + outcome,
+                        bet,
+                        credit,
+                        multiplier
+                );
+            } catch (Exception ex) {
+                ex.printStackTrace();
+            }
+
             pay.add(Map.of(
-                    "seat",   e.getKey(),
-                    "bet",    bet,
+                    "seat", e.getKey(),
+                    "bet", bet,
                     "credit", credit,
-                    "total",  total,
+                    "total", total,
                     "outcome", outcome
             ));
         }
 
         t.setPhase(TablePhase.PAYOUT);
         t.setPhaseDeadlineEpochMs(Instant.now().toEpochMilli() + RESULT_MS);
-
-        // envoie d'abord l'événement PAYOUTS (payload détaillé)
         broadcast(t, "PAYOUTS", Map.of("payouts", pay));
-
-        // envoie aussi TABLE_STATE sans code
-        broadcast(t, "TABLE_STATE", m(
-                "tableId",            t.getId(),
-                "phase",              t.getPhase(),
-                "deadline",           t.getPhaseDeadlineEpochMs(),
-                "seats",              seatsPayload(t),
-                "dealer",             t.getDealer(),
-                "currentSeatIndex",   t.getCurrentSeatIndex(),
-                "isPrivate",          t.isPrivate(),
-                "creatorEmail",       t.getCreatorEmail(),
-                "creatorDisplayName", displayNameForEmail(t.getCreatorEmail()),
-                "name",               t.getName(),
-                "minBet",             t.getMinBet(),
-                "maxBet",             t.getMaxBet(),
-                "lastPayouts",        pay
-        ));
+        broadcastState(t);
 
         scheduler.schedule(() -> {
             synchronized (BjTableService.this) {
                 for (Seat s : t.getSeats().values()) s.resetForNextHand();
                 t.getDealer().getCards().clear();
-
-                if (t.isPendingClose()) {
-                    doCloseNow(t.getId(), t);
-                    return;
-                }
-
-
                 t.setPhase(TablePhase.BETTING);
                 t.setPhaseDeadlineEpochMs(Instant.now().toEpochMilli() + BETTING_MS);
                 broadcastState(t);
-                broadcastLobby();
-
                 goBetting(t);
             }
         }, RESULT_MS, TimeUnit.MILLISECONDS);
