@@ -30,6 +30,10 @@ public class BjTableService {
     // runtime tables (id DB -> runtime object)
     private final Map<Long, BjTable> tables = new ConcurrentHashMap<>();
 
+    // In BjTableService
+    private final Map<String, String> displayNameCache = new ConcurrentHashMap<>();
+
+
     // emails autorisés pour joindre une table privée (tableId -> set d'emails)
     private final Map<Long, Set<String>> privateAccess = new ConcurrentHashMap<>();
 
@@ -63,18 +67,22 @@ public class BjTableService {
     // Helper: affiche le pseudo si on trouve l'utilisateur, sinon fallback sur la partie locale de l'email ou null
     private String displayNameForEmail(String email) {
         if (email == null) return null;
-        try {
-            return utilisateurRepo.findByEmail(email)
-                    .map(u -> u.getPseudo())
-                    .orElseGet(() -> {
-                        int at = email.indexOf('@');
-                        return at > 0 ? email.substring(0, at) : email;
-                    });
-        } catch (Exception ex) {
-            int at = email.indexOf('@');
-            return at > 0 ? email.substring(0, at) : email;
-        }
+
+        return displayNameCache.computeIfAbsent(email, e -> {
+            try {
+                return utilisateurRepo.findByEmail(e)
+                        .map(Utilisateur::getPseudo)
+                        .orElseGet(() -> {
+                            int at = e.indexOf('@');
+                            return at > 0 ? e.substring(0, at) : e;
+                        });
+            } catch (Exception ex) {
+                int at = e.indexOf('@');
+                return at > 0 ? e.substring(0, at) : e;
+            }
+        });
     }
+
 
     // Helper: transforme la Map<Integer,Seat> en Map<Integer, Map<String,Object>> serialisable,
 // en ajoutant "displayName" pour chaque siège.

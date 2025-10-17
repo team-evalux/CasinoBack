@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -52,6 +53,7 @@ public class RouletteController {
     }
 
     @PostMapping("/roulette")
+    @Transactional
     public ResponseEntity<?> jouerRoulette(@RequestBody RouletteBetRequest req, Authentication authentication) {
         if (req == null || req.betType == null || req.betValue == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "Paramètres invalides"));
