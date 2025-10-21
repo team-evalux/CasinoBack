@@ -1,4 +1,3 @@
-// src/main/java/org/example/service/SlotService.java
 package org.example.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -10,146 +9,217 @@ import org.springframework.stereotype.Service;
 import jakarta.annotation.PostConstruct;
 import java.security.SecureRandom;
 import java.util.*;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
 public class SlotService {
+
     private static final int MAX_REELS = 5;
-    private volatile Map<String, Double> symbolValues = new LinkedHashMap<>();
-
-    private volatile List<String> symbols = new CopyOnWriteArrayList<>(List.of("🍒", "🍋", "🍊", "⭐", "7️⃣"));
-    private volatile List<List<Integer>> reelWeights = new CopyOnWriteArrayList<>();
-    private volatile LinkedHashMap<Integer, Integer> payouts = new LinkedHashMap<>();
-    private volatile int reelsCount = 3;
-
-    private final SecureRandom random = new SecureRandom();
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final SecureRandom random = new SecureRandom();
     private final SlotConfigRepository repo;
 
     public SlotService(SlotConfigRepository repo) {
         this.repo = repo;
-        resetDefaultWeights();
-        resetDefaultPayouts();
     }
+
+    public static class SlotRuntimeConfig {
+        public final List<String> symbols;
+        public final List<List<Integer>> reelWeights;
+        public final LinkedHashMap<Integer,Integer> payouts;
+        public final LinkedHashMap<String,Double> symbolValues;
+        public final int reelsCount;
+
+        public SlotRuntimeConfig(List<String> symbols, List<List<Integer>> reelWeights,
+                                 LinkedHashMap<Integer,Integer> payouts, LinkedHashMap<String,Double> symbolValues,
+                                 int reelsCount) {
+            this.symbols = symbols;
+            this.reelWeights = reelWeights;
+            this.payouts = payouts;
+            this.symbolValues = symbolValues;
+            this.reelsCount = reelsCount;
+        }
+    }
+
+    private final Map<Integer, SlotRuntimeConfig> configs = new ConcurrentHashMap<>();
 
     @PostConstruct
     public void initFromDb() {
         List<SlotConfig> all = repo.findAll();
+        configs.clear();
         if (all.isEmpty()) {
-            // persist defaults
-            persistCurrentConfig();
+            configs.put(3, buildDefaultConfig(3));
+            configs.put(4, buildDefaultConfig(4));
+            configs.put(5, buildDefaultConfig(5));
+            persistAllConfigs();
             return;
         }
-        SlotConfig cfg = all.get(0);
-        try {
-            if (cfg.getSymbolsJson() != null) {
-                List<String> sym = objectMapper.readValue(cfg.getSymbolsJson(), new TypeReference<>() {});
-                if (sym != null && !sym.isEmpty()) this.symbols = new CopyOnWriteArrayList<>(sym);
-            }
-        } catch (Exception ex) { /* ignore & keep defaults */ }
+        for (SlotConfig cfg : all) {
+            try {
+                List<String> sym = cfg.getSymbolsJson() != null ?
+                        objectMapper.readValue(cfg.getSymbolsJson(), new TypeReference<List<String>>() {}) :
+                        new ArrayList<>(List.of("🍒","🍋","🍊","⭐","7️⃣"));
+                List<List<Integer>> rw = cfg.getReelWeightsJson() != null ?
+                        objectMapper.readValue(cfg.getReelWeightsJson(), new TypeReference<List<List<Integer>>>() {}) :
+                        null;
+                Map<String,Integer> p = cfg.getPayoutsJson() != null ?
+                        objectMapper.readValue(cfg.getPayoutsJson(), new TypeReference<Map<String,Integer>>() {}) :
+                        null;
+                Map<String,Double> sv = cfg.getSymbolValuesJson() != null ?
+                        objectMapper.readValue(cfg.getSymbolValuesJson(), new TypeReference<Map<String,Double>>() {}) :
+                        null;
 
-        try {
-            if (cfg.getSymbolValuesJson() != null) {
-                Map<String, Double> sv = objectMapper.readValue(cfg.getSymbolValuesJson(), new TypeReference<>() {});
-                if (sv != null && !sv.isEmpty()) this.symbolValues = new LinkedHashMap<>(sv);
-            }
-        } catch (Exception ex) { /* ignore & default to 1.0 */ }
-
-        try {
-            if (cfg.getReelWeightsJson() != null) {
-                List<List<Integer>> rw = objectMapper.readValue(cfg.getReelWeightsJson(), new TypeReference<>() {});
-                if (rw != null && !rw.isEmpty()) this.reelWeights = new CopyOnWriteArrayList<>(rw);
-            }
-        } catch (Exception ex) { /* ignore */ }
-
-        try {
-            if (cfg.getPayoutsJson() != null) {
-                Map<String,Integer> p = objectMapper.readValue(cfg.getPayoutsJson(), new TypeReference<>() {});
+                LinkedHashMap<Integer,Integer> payoutsMap = new LinkedHashMap<>();
                 if (p != null && !p.isEmpty()) {
-                    LinkedHashMap<Integer,Integer> map = new LinkedHashMap<>();
                     p.entrySet().stream()
                             .sorted(Map.Entry.<String,Integer>comparingByKey(Comparator.reverseOrder()))
-                            .forEach(e -> map.put(Integer.valueOf(e.getKey()), e.getValue()));
-                    this.payouts = map;
+                            .forEach(e -> payoutsMap.put(Integer.valueOf(e.getKey()), e.getValue()));
+                } else {
+                    payoutsMap.put(3, 10);
+                    payoutsMap.put(2, 2);
                 }
+
+                if (rw == null || rw.isEmpty()) {
+                    rw = new ArrayList<>();
+                    int rc = (cfg.getReelsCount() != null && cfg.getReelsCount() > 0) ? cfg.getReelsCount() : 3;
+                    for (int r = 0; r < rc; r++) {
+                        List<Integer> w = new ArrayList<>();
+                        for (int i = 0; i < sym.size(); i++) w.add(100);
+                        rw.add(w);
+                    }
+                } else {
+                    for (int r = 0; r < rw.size(); r++) {
+                        List<Integer> row = rw.get(r);
+                        if (row == null) row = new ArrayList<>();
+                        while (row.size() < sym.size()) row.add(100);
+                        if (row.size() > sym.size()) row = row.subList(0, sym.size());
+                        rw.set(r, new ArrayList<>(row));
+                    }
+                }
+
+                LinkedHashMap<String, Double> symbolValuesMap = new LinkedHashMap<>();
+                if (sv != null) {
+                    for (String s : sym) {
+                        Double v = sv.get(s);
+                        symbolValuesMap.put(s, v == null ? 1.0 : v);
+                    }
+                } else {
+                    for (String s : sym) symbolValuesMap.put(s, 1.0);
+                }
+
+                int rc = (cfg.getReelsCount() != null && cfg.getReelsCount() > 0) ? cfg.getReelsCount() : rw.size();
+                SlotRuntimeConfig runtime = new SlotRuntimeConfig(new ArrayList<>(sym),
+                        rw.stream().map(ArrayList::new).collect(Collectors.toList()),
+                        payoutsMap,
+                        symbolValuesMap,
+                        rc);
+                configs.put(rc, runtime);
+            } catch (Exception ex) {
+                // ignore malformed row
             }
-        } catch (Exception ex) { /* ignore */ }
-
-        if (cfg.getReelsCount() != null && cfg.getReelsCount() > 0) {
-            this.reelsCount = cfg.getReelsCount();
         }
-
-        // normalize shapes
-        ensureWeightsShape();
-        if (payouts == null || payouts.isEmpty()) resetDefaultPayouts();
+        for (int r : new int[]{3,4,5}) configs.computeIfAbsent(r, this::buildDefaultConfig);
     }
 
-    private void resetDefaultWeights() {
-        reelWeights.clear();
+    private SlotRuntimeConfig buildDefaultConfig(int reelsCount) {
+        List<String> sym = new ArrayList<>(List.of("🍒","🍋","🍊","⭐","7️⃣"));
+        List<List<Integer>> rw = new ArrayList<>();
         for (int r = 0; r < reelsCount; r++) {
-            List<Integer> weights = new ArrayList<>();
-            for (int i = 0; i < symbols.size(); i++) weights.add(100);
-            reelWeights.add(weights);
+            List<Integer> row = new ArrayList<>();
+            for (int i = 0; i < sym.size(); i++) row.add(100);
+            rw.add(row);
         }
-    }
-
-    public synchronized Map<String, Double> getSymbolValues() {
-        return new LinkedHashMap<>(this.symbolValues);
-    }
-
-    private void resetDefaultPayouts() {
-        payouts.clear();
+        LinkedHashMap<Integer,Integer> payouts = new LinkedHashMap<>();
         payouts.put(3, 10);
         payouts.put(2, 2);
+        LinkedHashMap<String,Double> sv = new LinkedHashMap<>();
+        for (String s : sym) sv.put(s, 1.0);
+        return new SlotRuntimeConfig(sym, rw, payouts, sv, reelsCount);
     }
 
-    private void persistCurrentConfig() {
+    private void persistAllConfigs() {
+        for (SlotRuntimeConfig cfg : configs.values()) persistRuntimeConfig(cfg);
+    }
+
+    private void persistRuntimeConfig(SlotRuntimeConfig cfg) {
         try {
-            String symbolsJson = objectMapper.writeValueAsString(this.symbols);
-            String reelWeightsJson = objectMapper.writeValueAsString(this.reelWeights);
+            String symbolsJson = objectMapper.writeValueAsString(cfg.symbols);
+            String reelWeightsJson = objectMapper.writeValueAsString(cfg.reelWeights);
             Map<String,Integer> payoutsObj = new LinkedHashMap<>();
-            for (Map.Entry<Integer,Integer> e : this.payouts.entrySet()) payoutsObj.put(String.valueOf(e.getKey()), e.getValue());
+            for (Map.Entry<Integer,Integer> e : cfg.payouts.entrySet()) payoutsObj.put(String.valueOf(e.getKey()), e.getValue());
             String payoutsJson = objectMapper.writeValueAsString(payoutsObj);
+            String symbolValuesJson = objectMapper.writeValueAsString(cfg.symbolValues);
 
-            // symbolValues -> Map<String,Double>
-            String symbolValuesJson = objectMapper.writeValueAsString(this.symbolValues);
-
-            SlotConfig cfg = new SlotConfig(symbolsJson, reelWeightsJson, payoutsJson, symbolValuesJson, this.reelsCount);
             List<SlotConfig> all = repo.findAll();
-            if (all.isEmpty()) repo.save(cfg);
-            else {
-                SlotConfig exist = all.get(0);
-                exist.setSymbolsJson(symbolsJson);
-                exist.setReelWeightsJson(reelWeightsJson);
-                exist.setPayoutsJson(payoutsJson);
-                exist.setSymbolValuesJson(symbolValuesJson);
-                exist.setReelsCount(this.reelsCount);
-                repo.save(exist);
+            SlotConfig toUpdate = null;
+            for (SlotConfig sc : all) {
+                if (sc.getReelsCount() != null && sc.getReelsCount().intValue() == cfg.reelsCount) { toUpdate = sc; break; }
+            }
+            if (toUpdate == null) {
+                SlotConfig sc = new SlotConfig(symbolsJson, reelWeightsJson, payoutsJson, symbolValuesJson, cfg.reelsCount);
+                repo.save(sc);
+            } else {
+                toUpdate.setSymbolsJson(symbolsJson);
+                toUpdate.setReelWeightsJson(reelWeightsJson);
+                toUpdate.setPayoutsJson(payoutsJson);
+                toUpdate.setSymbolValuesJson(symbolValuesJson);
+                toUpdate.setReelsCount(cfg.reelsCount);
+                repo.save(toUpdate);
             }
         } catch (Exception ex) {
-            // log si tu veux
+            // ignore
         }
     }
 
-    // ----- ton code spin / weighted pick / computePayout inchangé -----
+    public SlotRuntimeConfig getRuntimeConfigFor(int reelsCount) {
+        return configs.get(reelsCount);
+    }
 
-    public List<String> spin() {
-        ensureWeightsShape();
-        List<String> res = new ArrayList<>(reelsCount);
-        for (int r = 0; r < reelsCount; r++) {
-            int idx = weightedPickIndex(reelWeights.get(r));
-            if (idx < 0 || idx >= symbols.size()) idx = 0;
-            res.add(symbols.get(idx));
+    public Map<Integer, SlotRuntimeConfig> getAllRuntimeConfigs() {
+        return new LinkedHashMap<>(configs);
+    }
+
+    public List<String> spinForReels(Integer requestedReels) {
+        int rc = (requestedReels != null && requestedReels > 0) ? requestedReels : 3;
+        rc = Math.max(1, rc);
+        SlotRuntimeConfig cfg = findNearestConfigOrDefault(rc);
+        List<List<Integer>> tempWeights = new ArrayList<>();
+        for (int r = 0; r < rc; r++) {
+            if (r < cfg.reelWeights.size() && cfg.reelWeights.get(r) != null && cfg.reelWeights.get(r).size() == cfg.symbols.size()) {
+                tempWeights.add(new ArrayList<>(cfg.reelWeights.get(r)));
+            } else {
+                List<Integer> def = new ArrayList<>();
+                for (int i = 0; i < cfg.symbols.size(); i++) def.add(100);
+                tempWeights.add(def);
+            }
+        }
+        List<String> res = new ArrayList<>(rc);
+        for (int r = 0; r < rc; r++) {
+            int idx = weightedPickIndexUsingWeights(tempWeights.get(r));
+            if (idx < 0 || idx >= cfg.symbols.size()) idx = 0;
+            res.add(cfg.symbols.get(idx));
         }
         return res;
     }
 
-    private int weightedPickIndex(List<Integer> weights) {
-        if (weights == null || weights.isEmpty()) return random.nextInt(symbols.size());
+    private SlotRuntimeConfig findNearestConfigOrDefault(int rc) {
+        if (configs.containsKey(rc)) return configs.get(rc);
+        int bestLower = -1, bestHigher = Integer.MAX_VALUE;
+        for (Integer k : configs.keySet()) {
+            if (k < rc && k > bestLower) bestLower = k;
+            if (k > rc && k < bestHigher) bestHigher = k;
+        }
+        if (bestLower != -1) return configs.get(bestLower);
+        if (bestHigher != Integer.MAX_VALUE) return configs.get(bestHigher);
+        return buildDefaultConfig(rc);
+    }
+
+    private int weightedPickIndexUsingWeights(List<Integer> weights) {
+        if (weights == null || weights.isEmpty()) return random.nextInt(Math.max(1, weights.size()));
         int total = 0;
         for (Integer w : weights) total += (w == null ? 0 : w);
-        if (total <= 0) return random.nextInt(symbols.size());
+        if (total <= 0) return random.nextInt(weights.size());
         int v = random.nextInt(total);
         int cum = 0;
         for (int i = 0; i < weights.size(); i++) {
@@ -161,177 +231,114 @@ public class SlotService {
 
     public long computePayout(List<String> reels, long mise) {
         if (reels == null || reels.isEmpty()) return 0L;
-        Map<String, Long> counts = reels.stream().collect(Collectors.groupingBy(s->s, Collectors.counting()));
-        // on parcour les k (descendant) : pour chaque k, regarder les symboles ayant count >= k
-        List<Integer> keysDesc = payouts.keySet().stream().sorted(Comparator.reverseOrder()).collect(Collectors.toList());
+        int rc = reels.size();
+        SlotRuntimeConfig cfg = findNearestConfigOrDefault(rc);
+        Map<String, Long> counts = reels.stream().collect(Collectors.groupingBy(s -> s, Collectors.counting()));
+        List<Integer> keysDesc = new ArrayList<>(cfg.payouts.keySet());
+        keysDesc.sort(Comparator.reverseOrder());
         for (Integer k : keysDesc) {
             if (k == null || k < 1) continue;
-            // check which symbols have at least k occurrences
             List<String> candidates = counts.entrySet().stream()
                     .filter(e -> e.getValue() >= k)
                     .map(Map.Entry::getKey)
                     .collect(Collectors.toList());
             if (!candidates.isEmpty()) {
-                Integer baseMult = payouts.get(k);
+                Integer baseMult = cfg.payouts.get(k);
                 if (baseMult == null || baseMult <= 0) return 0L;
-                // compute best symbolValue among candidates
                 double bestSv = 1.0;
                 for (String sym : candidates) {
-                    Double sv = symbolValues.get(sym);
+                    Double sv = cfg.symbolValues.get(sym);
                     if (sv == null) sv = 1.0;
                     if (sv > bestSv) bestSv = sv;
                 }
-                // final payout as long: mise * baseMult * bestSv
                 double gain = ((double) mise) * baseMult * bestSv;
-                // round down to long (ou utiliser Math.round selon préférence)
                 return (long) Math.floor(gain);
             }
         }
         return 0L;
     }
 
-
-    // helper : valeur par défaut pour un k donné (cohérente avec frontend)
     private int defaultPayoutForK(int k) {
         return Math.max(1, (int)Math.floor(Math.pow(3, k - 2)));
     }
 
-    public synchronized void updateConfig(List<String> newSymbols,
-                                          List<List<Integer>> newReelWeights,
-                                          Integer newReelsCount,
-                                          Map<Integer,Integer> newPayouts,
-                                          Map<String, Double> newSymbolValues) {
-        if (newSymbols != null && !newSymbols.isEmpty()) this.symbols = new CopyOnWriteArrayList<>(newSymbols);
-        if (newReelsCount != null && newReelsCount > 0) this.reelsCount = Math.max(1, newReelsCount);
+    public synchronized void updateConfigForReels(int reelsCount,
+                                                  List<String> newSymbols,
+                                                  List<List<Integer>> newReelWeights,
+                                                  Map<Integer,Integer> newPayouts,
+                                                  Map<String,Double> newSymbolValues) {
+        List<String> symbols = (newSymbols != null && !newSymbols.isEmpty()) ? new ArrayList<>(newSymbols) : new ArrayList<>(List.of("🍒","🍋","🍊","⭐","7️⃣"));
 
-        // reel weights normalization existante (inchangée)
+        List<List<Integer>> reelWeights = new ArrayList<>();
         if (newReelWeights != null) {
-            List<List<Integer>> normalized = new ArrayList<>();
-            for (int r = 0; r < this.reelsCount; r++) {
+            for (int r = 0; r < reelsCount; r++) {
                 List<Integer> row = (r < newReelWeights.size() ? newReelWeights.get(r) : null);
                 List<Integer> finalRow = new ArrayList<>();
-                if (row != null && row.size() == this.symbols.size()) finalRow.addAll(row);
+                if (row != null && row.size() == symbols.size()) finalRow.addAll(row);
                 else {
-                    for (int i = 0; i < this.symbols.size(); i++) finalRow.add(100);
+                    for (int i = 0; i < symbols.size(); i++) finalRow.add(100);
                 }
-                normalized.add(finalRow);
+                reelWeights.add(finalRow);
             }
-            this.reelWeights = new CopyOnWriteArrayList<>(normalized);
         } else {
-            resetDefaultWeights();
+            for (int r = 0; r < reelsCount; r++) {
+                List<Integer> row = new ArrayList<>();
+                for (int i = 0; i < symbols.size(); i++) row.add(100);
+                reelWeights.add(row);
+            }
         }
 
-        Map<String, Double> normalizedSv = new LinkedHashMap<>();
-        for (String s : this.symbols) {
-            Double v = (newSymbolValues != null) ? newSymbolValues.get(s) : null;
-            if (v == null) v = 1.0;
-            normalizedSv.put(s, v);
-        }
-        this.symbolValues = normalizedSv;
-
-        // payouts : on s'assure d'avoir des clefs 2..MAX_REELS
+        // ✅ Correction: construire payouts via TreeMap (ordre décroissant), puis LinkedHashMap
+        NavigableMap<Integer, Integer> tm = new TreeMap<>(Comparator.reverseOrder());
         if (newPayouts != null && !newPayouts.isEmpty()) {
-            LinkedHashMap<Integer,Integer> copy = new LinkedHashMap<>();
-            newPayouts.entrySet().stream()
-                    .sorted(Map.Entry.<Integer,Integer>comparingByKey(Comparator.reverseOrder()))
-                    .forEach(e -> copy.put(e.getKey(), e.getValue()));
-            // ajouter manquants jusqu'à MAX_REELS
-            for (int k = 2; k <= MAX_REELS; k++) {
-                if (!copy.containsKey(k)) {
-                    copy.put(k, defaultPayoutForK(k));
-                }
-            }
-            // garder l'ordre décroissant des keys
-            LinkedHashMap<Integer,Integer> sorted = new LinkedHashMap<>();
-            copy.keySet().stream().sorted(Comparator.reverseOrder()).forEach(k -> sorted.put(k, copy.get(k)));
-            this.payouts = sorted;
-        } else {
-            // si pas de newPayouts fournis -> on peut créer des defaults jusqu'à MAX_REELS
-            LinkedHashMap<Integer,Integer> defaults = new LinkedHashMap<>();
-            for (int k = 2; k <= MAX_REELS; k++) defaults.put(k, defaultPayoutForK(k));
-            // ordonner décroissant
-            LinkedHashMap<Integer,Integer> sorted = new LinkedHashMap<>();
-            defaults.keySet().stream().sorted(Comparator.reverseOrder()).forEach(k -> sorted.put(k, defaults.get(k)));
-            this.payouts = sorted;
+            tm.putAll(newPayouts);
+        }
+        for (int k = 2; k <= MAX_REELS; k++) {
+            tm.putIfAbsent(k, defaultPayoutForK(k));
+        }
+        LinkedHashMap<Integer, Integer> payouts = new LinkedHashMap<>(tm);
+
+        LinkedHashMap<String,Double> symbolValues = new LinkedHashMap<>();
+        for (String s : symbols) {
+            Double v = (newSymbolValues != null) ? newSymbolValues.get(s) : null;
+            symbolValues.put(s, v == null ? 1.0 : v);
         }
 
-        // persist updated config
-        persistCurrentConfig();
+        SlotRuntimeConfig runtime = new SlotRuntimeConfig(symbols, reelWeights, payouts, symbolValues, reelsCount);
+        configs.put(reelsCount, runtime);
+        persistRuntimeConfig(runtime);
     }
 
-    public synchronized List<String> getSymbols() { return new ArrayList<>(symbols); }
-    public synchronized List<List<Integer>> getReelWeights() { return reelWeights.stream().map(ArrayList::new).collect(Collectors.toList()); }
-    public synchronized Map<Integer,Integer> getPayouts() { return new LinkedHashMap<>(payouts); }
-    public int getReelsCount() { return reelsCount; }
-
-    private void ensureWeightsShape() {
-        if (reelWeights == null || reelWeights.size() != reelsCount) {
-            resetDefaultWeights();
-            return;
-        }
-        for (int r = 0; r < reelsCount; r++) {
-            List<Integer> row = reelWeights.get(r);
-            if (row == null || row.size() != symbols.size()) {
-                List<Integer> newRow = new ArrayList<>();
-                for (int i = 0; i < symbols.size(); i++) newRow.add(100);
-                reelWeights.set(r, newRow);
-            }
-        }
+    public synchronized List<String> getSymbols() {
+        SlotRuntimeConfig cfg = configs.get(3);
+        return cfg == null ? List.of() : new ArrayList<>(cfg.symbols);
     }
 
-    // dans SlotService.java
-
-    /**
-     * Effectue un spin sans modifier la configuration globale.
-     * Utilise les reelWeights existants pour les premiers rouleaux,
-     * et génère des rouleaux par défaut (poids = 100) si requestedReels > reelWeights.size().
-     */
-    public List<String> spinForReels(Integer requestedReels) {
-        int rc = (requestedReels != null && requestedReels > 0) ? requestedReels : this.reelsCount;
-        rc = Math.max(1, rc); // au moins 1
-
-        // build temporary weights shape for this spin (do NOT mutate this.reelWeights)
-        List<List<Integer>> tempWeights = new ArrayList<>();
-        for (int r = 0; r < rc; r++) {
-            if (r < this.reelWeights.size() && this.reelWeights.get(r) != null && this.reelWeights.get(r).size() == this.symbols.size()) {
-                tempWeights.add(new ArrayList<>(this.reelWeights.get(r)));
-            } else {
-                // default weights for this reel
-                List<Integer> def = new ArrayList<>();
-                for (int i = 0; i < this.symbols.size(); i++) def.add(100);
-                tempWeights.add(def);
-            }
-        }
-
-        // perform picks using temporary weights
-        List<String> res = new ArrayList<>(rc);
-        for (int r = 0; r < rc; r++) {
-            int idx = weightedPickIndexUsingWeights(tempWeights.get(r));
-            if (idx < 0 || idx >= symbols.size()) idx = 0;
-            res.add(symbols.get(idx));
-        }
-        return res;
+    public synchronized List<List<Integer>> getReelWeights() {
+        SlotRuntimeConfig cfg = configs.get(3);
+        return cfg == null ? List.of() : cfg.reelWeights.stream().map(ArrayList::new).collect(Collectors.toList());
     }
 
-    /** weighted pick based on passed weights (keeps existing symbol list) */
-    private int weightedPickIndexUsingWeights(List<Integer> weights) {
-        if (weights == null || weights.isEmpty()) return random.nextInt(symbols.size());
-        int total = 0;
-        for (Integer w : weights) total += (w == null ? 0 : w);
-        if (total <= 0) return random.nextInt(symbols.size());
-        int v = random.nextInt(total);
-        int cum = 0;
-        for (int i = 0; i < weights.size(); i++) {
-            cum += (weights.get(i) == null ? 0 : weights.get(i));
-            if (v < cum) return i;
-        }
-        return weights.size() - 1;
+    public synchronized Map<Integer,Integer> getPayouts() {
+        SlotRuntimeConfig cfg = configs.get(3);
+        return cfg == null ? new LinkedHashMap<>() : new LinkedHashMap<>(cfg.payouts);
+    }
+
+    public synchronized Map<String,Double> getSymbolValues() {
+        SlotRuntimeConfig cfg = configs.get(3);
+        return cfg == null ? new LinkedHashMap<>() : new LinkedHashMap<>(cfg.symbolValues);
+    }
+
+    public int getReelsCount() {
+        SlotRuntimeConfig cfg = configs.get(3);
+        return cfg == null ? 3 : cfg.reelsCount;
     }
 
     public int getTotalWeightForReel(int reelIndex) {
-        if (reelIndex < 0 || reelIndex >= reelWeights.size()) return 0;
+        SlotRuntimeConfig cfg = configs.get(3);
+        if (cfg == null || reelIndex < 0 || reelIndex >= cfg.reelWeights.size()) return 0;
         int sum = 0;
-        for (Integer w : reelWeights.get(reelIndex)) sum += (w == null ? 0 : w);
+        for (Integer w : cfg.reelWeights.get(reelIndex)) sum += (w == null ? 0 : w);
         return sum;
     }
 }
