@@ -15,6 +15,7 @@ import java.util.stream.Collectors;
 
 @Service
 public class SlotService {
+    private static final int MAX_REELS = 5;
 
     private volatile List<String> symbols = new CopyOnWriteArrayList<>(List.of("🍒", "🍋", "🍊", "⭐", "7️⃣"));
     private volatile List<List<Integer>> reelWeights = new CopyOnWriteArrayList<>();
@@ -157,7 +158,11 @@ public class SlotService {
         return 0L;
     }
 
-    // admin update : applique et persiste
+    // helper : valeur par défaut pour un k donné (cohérente avec frontend)
+    private int defaultPayoutForK(int k) {
+        return Math.max(1, (int)Math.floor(Math.pow(3, k - 2)));
+    }
+
     public synchronized void updateConfig(List<String> newSymbols,
                                           List<List<Integer>> newReelWeights,
                                           Integer newReelsCount,
@@ -165,6 +170,7 @@ public class SlotService {
         if (newSymbols != null && !newSymbols.isEmpty()) this.symbols = new CopyOnWriteArrayList<>(newSymbols);
         if (newReelsCount != null && newReelsCount > 0) this.reelsCount = Math.max(1, newReelsCount);
 
+        // reel weights normalization existante (inchangée)
         if (newReelWeights != null) {
             List<List<Integer>> normalized = new ArrayList<>();
             for (int r = 0; r < this.reelsCount; r++) {
@@ -181,12 +187,30 @@ public class SlotService {
             resetDefaultWeights();
         }
 
+        // payouts : on s'assure d'avoir des clefs 2..MAX_REELS
         if (newPayouts != null && !newPayouts.isEmpty()) {
             LinkedHashMap<Integer,Integer> copy = new LinkedHashMap<>();
             newPayouts.entrySet().stream()
                     .sorted(Map.Entry.<Integer,Integer>comparingByKey(Comparator.reverseOrder()))
                     .forEach(e -> copy.put(e.getKey(), e.getValue()));
-            this.payouts = copy;
+            // ajouter manquants jusqu'à MAX_REELS
+            for (int k = 2; k <= MAX_REELS; k++) {
+                if (!copy.containsKey(k)) {
+                    copy.put(k, defaultPayoutForK(k));
+                }
+            }
+            // garder l'ordre décroissant des keys
+            LinkedHashMap<Integer,Integer> sorted = new LinkedHashMap<>();
+            copy.keySet().stream().sorted(Comparator.reverseOrder()).forEach(k -> sorted.put(k, copy.get(k)));
+            this.payouts = sorted;
+        } else {
+            // si pas de newPayouts fournis -> on peut créer des defaults jusqu'à MAX_REELS
+            LinkedHashMap<Integer,Integer> defaults = new LinkedHashMap<>();
+            for (int k = 2; k <= MAX_REELS; k++) defaults.put(k, defaultPayoutForK(k));
+            // ordonner décroissant
+            LinkedHashMap<Integer,Integer> sorted = new LinkedHashMap<>();
+            defaults.keySet().stream().sorted(Comparator.reverseOrder()).forEach(k -> sorted.put(k, defaults.get(k)));
+            this.payouts = sorted;
         }
 
         // persist updated config
@@ -211,6 +235,55 @@ public class SlotService {
                 reelWeights.set(r, newRow);
             }
         }
+    }
+
+    // dans SlotService.java
+
+    /**
+     * Effectue un spin sans modifier la configuration globale.
+     * Utilise les reelWeights existants pour les premiers rouleaux,
+     * et génère des rouleaux par défaut (poids = 100) si requestedReels > reelWeights.size().
+     */
+    public List<String> spinForReels(Integer requestedReels) {
+        int rc = (requestedReels != null && requestedReels > 0) ? requestedReels : this.reelsCount;
+        rc = Math.max(1, rc); // au moins 1
+
+        // build temporary weights shape for this spin (do NOT mutate this.reelWeights)
+        List<List<Integer>> tempWeights = new ArrayList<>();
+        for (int r = 0; r < rc; r++) {
+            if (r < this.reelWeights.size() && this.reelWeights.get(r) != null && this.reelWeights.get(r).size() == this.symbols.size()) {
+                tempWeights.add(new ArrayList<>(this.reelWeights.get(r)));
+            } else {
+                // default weights for this reel
+                List<Integer> def = new ArrayList<>();
+                for (int i = 0; i < this.symbols.size(); i++) def.add(100);
+                tempWeights.add(def);
+            }
+        }
+
+        // perform picks using temporary weights
+        List<String> res = new ArrayList<>(rc);
+        for (int r = 0; r < rc; r++) {
+            int idx = weightedPickIndexUsingWeights(tempWeights.get(r));
+            if (idx < 0 || idx >= symbols.size()) idx = 0;
+            res.add(symbols.get(idx));
+        }
+        return res;
+    }
+
+    /** weighted pick based on passed weights (keeps existing symbol list) */
+    private int weightedPickIndexUsingWeights(List<Integer> weights) {
+        if (weights == null || weights.isEmpty()) return random.nextInt(symbols.size());
+        int total = 0;
+        for (Integer w : weights) total += (w == null ? 0 : w);
+        if (total <= 0) return random.nextInt(symbols.size());
+        int v = random.nextInt(total);
+        int cum = 0;
+        for (int i = 0; i < weights.size(); i++) {
+            cum += (weights.get(i) == null ? 0 : weights.get(i));
+            if (v < cum) return i;
+        }
+        return weights.size() - 1;
     }
 
     public int getTotalWeightForReel(int reelIndex) {

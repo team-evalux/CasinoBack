@@ -40,6 +40,14 @@ public class SlotController {
         if (req == null || req.montant <= 0) {
             return ResponseEntity.badRequest().body(Map.of("error", "Montant invalide"));
         }
+        // validate requested reelsCount (avoid abus) : autoriser 1..10 par exemple
+        Integer requestedReels = req.reelsCount;
+        if (requestedReels != null) {
+            if (requestedReels <= 0 || requestedReels > 10) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Nombre de rouleaux demandé invalide (1..10)"));
+            }
+        }
+
         String email = authentication.getName();
         Utilisateur u = utilisateurRepo.findByEmail(email).orElseThrow();
 
@@ -49,7 +57,8 @@ public class SlotController {
             return ResponseEntity.badRequest().body(Map.of("error", "Solde insuffisant"));
         }
 
-        List<String> reels = slotService.spin();
+        // spin en utilisant la valeur demandée sans sauvegarder la config globale
+        List<String> reels = slotService.spinForReels(requestedReels);
         long payout = slotService.computePayout(reels, req.montant);
         boolean win = payout > 0L;
         if (win) walletService.crediter(u, payout);
@@ -57,7 +66,7 @@ public class SlotController {
         Integer mult = 0;
         if (payout > 0 && req.montant > 0) mult = (int)(payout / req.montant);
 
-        historyService.record(u, "slots", String.join(",", reels), req.montant, payout, mult);
+        historyService.record(u, "slots", String.join(",", reels) + (requestedReels != null ? ("|r:"+requestedReels) : ""), req.montant, payout, mult);
 
         Wallet w = walletService.getWalletParUtilisateur(u);
         SlotPlayResponse resp = new SlotPlayResponse(reels, req.montant, payout, win, w.getSolde());
