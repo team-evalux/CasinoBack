@@ -16,6 +16,7 @@ import java.util.stream.Collectors;
 @Service
 public class SlotService {
     private static final int MAX_REELS = 5;
+    private volatile Map<String, Double> symbolValues = new LinkedHashMap<>();
 
     private volatile List<String> symbols = new CopyOnWriteArrayList<>(List.of("🍒", "🍋", "🍊", "⭐", "7️⃣"));
     private volatile List<List<Integer>> reelWeights = new CopyOnWriteArrayList<>();
@@ -47,6 +48,13 @@ public class SlotService {
                 if (sym != null && !sym.isEmpty()) this.symbols = new CopyOnWriteArrayList<>(sym);
             }
         } catch (Exception ex) { /* ignore & keep defaults */ }
+
+        try {
+            if (cfg.getSymbolValuesJson() != null) {
+                Map<String, Double> sv = objectMapper.readValue(cfg.getSymbolValuesJson(), new TypeReference<>() {});
+                if (sv != null && !sv.isEmpty()) this.symbolValues = new LinkedHashMap<>(sv);
+            }
+        } catch (Exception ex) { /* ignore & default to 1.0 */ }
 
         try {
             if (cfg.getReelWeightsJson() != null) {
@@ -86,6 +94,10 @@ public class SlotService {
         }
     }
 
+    public synchronized Map<String, Double> getSymbolValues() {
+        return new LinkedHashMap<>(this.symbolValues);
+    }
+
     private void resetDefaultPayouts() {
         payouts.clear();
         payouts.put(3, 10);
@@ -96,11 +108,14 @@ public class SlotService {
         try {
             String symbolsJson = objectMapper.writeValueAsString(this.symbols);
             String reelWeightsJson = objectMapper.writeValueAsString(this.reelWeights);
-            // payouts convert keys to strings for stable JSON
             Map<String,Integer> payoutsObj = new LinkedHashMap<>();
             for (Map.Entry<Integer,Integer> e : this.payouts.entrySet()) payoutsObj.put(String.valueOf(e.getKey()), e.getValue());
             String payoutsJson = objectMapper.writeValueAsString(payoutsObj);
-            SlotConfig cfg = new SlotConfig(symbolsJson, reelWeightsJson, payoutsJson, this.reelsCount);
+
+            // symbolValues -> Map<String,Double>
+            String symbolValuesJson = objectMapper.writeValueAsString(this.symbolValues);
+
+            SlotConfig cfg = new SlotConfig(symbolsJson, reelWeightsJson, payoutsJson, symbolValuesJson, this.reelsCount);
             List<SlotConfig> all = repo.findAll();
             if (all.isEmpty()) repo.save(cfg);
             else {
@@ -108,6 +123,7 @@ public class SlotService {
                 exist.setSymbolsJson(symbolsJson);
                 exist.setReelWeightsJson(reelWeightsJson);
                 exist.setPayoutsJson(payoutsJson);
+                exist.setSymbolValuesJson(symbolValuesJson);
                 exist.setReelsCount(this.reelsCount);
                 repo.save(exist);
             }
@@ -146,17 +162,34 @@ public class SlotService {
     public long computePayout(List<String> reels, long mise) {
         if (reels == null || reels.isEmpty()) return 0L;
         Map<String, Long> counts = reels.stream().collect(Collectors.groupingBy(s->s, Collectors.counting()));
-        long max = counts.values().stream().mapToLong(Long::longValue).max().orElse(0);
+        // on parcour les k (descendant) : pour chaque k, regarder les symboles ayant count >= k
         List<Integer> keysDesc = payouts.keySet().stream().sorted(Comparator.reverseOrder()).collect(Collectors.toList());
         for (Integer k : keysDesc) {
-            if (k != null && max >= k) {
-                Integer mult = payouts.get(k);
-                if (mult != null && mult > 0) return mise * mult;
-                else return 0L;
+            if (k == null || k < 1) continue;
+            // check which symbols have at least k occurrences
+            List<String> candidates = counts.entrySet().stream()
+                    .filter(e -> e.getValue() >= k)
+                    .map(Map.Entry::getKey)
+                    .collect(Collectors.toList());
+            if (!candidates.isEmpty()) {
+                Integer baseMult = payouts.get(k);
+                if (baseMult == null || baseMult <= 0) return 0L;
+                // compute best symbolValue among candidates
+                double bestSv = 1.0;
+                for (String sym : candidates) {
+                    Double sv = symbolValues.get(sym);
+                    if (sv == null) sv = 1.0;
+                    if (sv > bestSv) bestSv = sv;
+                }
+                // final payout as long: mise * baseMult * bestSv
+                double gain = ((double) mise) * baseMult * bestSv;
+                // round down to long (ou utiliser Math.round selon préférence)
+                return (long) Math.floor(gain);
             }
         }
         return 0L;
     }
+
 
     // helper : valeur par défaut pour un k donné (cohérente avec frontend)
     private int defaultPayoutForK(int k) {
@@ -166,7 +199,8 @@ public class SlotService {
     public synchronized void updateConfig(List<String> newSymbols,
                                           List<List<Integer>> newReelWeights,
                                           Integer newReelsCount,
-                                          Map<Integer,Integer> newPayouts) {
+                                          Map<Integer,Integer> newPayouts,
+                                          Map<String, Double> newSymbolValues) {
         if (newSymbols != null && !newSymbols.isEmpty()) this.symbols = new CopyOnWriteArrayList<>(newSymbols);
         if (newReelsCount != null && newReelsCount > 0) this.reelsCount = Math.max(1, newReelsCount);
 
@@ -186,6 +220,14 @@ public class SlotService {
         } else {
             resetDefaultWeights();
         }
+
+        Map<String, Double> normalizedSv = new LinkedHashMap<>();
+        for (String s : this.symbols) {
+            Double v = (newSymbolValues != null) ? newSymbolValues.get(s) : null;
+            if (v == null) v = 1.0;
+            normalizedSv.put(s, v);
+        }
+        this.symbolValues = normalizedSv;
 
         // payouts : on s'assure d'avoir des clefs 2..MAX_REELS
         if (newPayouts != null && !newPayouts.isEmpty()) {

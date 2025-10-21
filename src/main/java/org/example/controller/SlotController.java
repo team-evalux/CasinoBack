@@ -79,7 +79,8 @@ public class SlotController {
                 slotService.getSymbols(),
                 slotService.getReelWeights(),
                 slotService.getReelsCount(),
-                slotService.getPayouts()
+                slotService.getPayouts(),
+                slotService.getSymbolValues()
         );
         return ResponseEntity.ok(resp);
     }
@@ -91,13 +92,14 @@ public class SlotController {
         if (req.symbols == null || req.symbols.isEmpty()) return ResponseEntity.badRequest().body(Map.of("error", "symbols manquant"));
         int reelsCount = (req.reelsCount != null && req.reelsCount > 0) ? req.reelsCount : slotService.getReelsCount();
 
-        slotService.updateConfig(req.symbols, req.reelWeights, reelsCount, req.payouts);
+        slotService.updateConfig(req.symbols, req.reelWeights, reelsCount, req.payouts, req.symbolValues);
 
         SlotConfigResponse resp = new SlotConfigResponse(
                 slotService.getSymbols(),
                 slotService.getReelWeights(),
                 slotService.getReelsCount(),
-                slotService.getPayouts()
+                slotService.getPayouts(),
+                slotService.getSymbolValues()
         );
         return ResponseEntity.ok(resp);
     }
