@@ -25,6 +25,11 @@ public class SlotConfig {
     @Column(name = "payouts_json", columnDefinition = "text")
     private String payoutsJson;
 
+    // JSON: symbolValues -> {"🍋":0.6,"🍒":2.0}
+    @Lob
+    @Column(name = "symbol_values_json", columnDefinition = "text")
+    private String symbolValuesJson;
+
     @Column(name = "reels_count")
     private Integer reelsCount;
 
@@ -33,6 +38,14 @@ public class SlotConfig {
         this.symbolsJson = symbolsJson;
         this.reelWeightsJson = reelWeightsJson;
         this.payoutsJson = payoutsJson;
+        this.reelsCount = reelsCount;
+    }
+
+    public SlotConfig(String symbolsJson, String reelWeightsJson, String payoutsJson, String symbolValuesJson, Integer reelsCount) {
+        this.symbolsJson = symbolsJson;
+        this.reelWeightsJson = reelWeightsJson;
+        this.payoutsJson = payoutsJson;
+        this.symbolValuesJson = symbolValuesJson;
         this.reelsCount = reelsCount;
     }
 
@@ -46,4 +59,6 @@ public class SlotConfig {
     public void setPayoutsJson(String payoutsJson) { this.payoutsJson = payoutsJson; }
     public Integer getReelsCount() { return reelsCount; }
     public void setReelsCount(Integer reelsCount) { this.reelsCount = reelsCount; }
+    public String getSymbolValuesJson() { return symbolValuesJson; }
+    public void setSymbolValuesJson(String symbolValuesJson) { this.symbolValuesJson = symbolValuesJson; }
 }
