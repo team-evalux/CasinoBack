@@ -20,7 +20,24 @@ public class Shoe {
 
     public Card draw() {
         if (cards.size() < 20) reshuffle();
-        return cards.pollFirst();
+        Card c = cards.pollFirst();
+        if (c == null) {
+            // reconstituer un nouveau shoe si jamais vidé (fallback)
+            refill();
+            c = cards.pollFirst();
+        }
+        return c;
+    }
+
+    private void refill() {
+        List<Card> tmp = new ArrayList<>();
+        for (int d=0; d<6; d++) { // même nombre de decks que le ctor
+            for (Card.Suit s : Card.Suit.values())
+                for (Card.Rank r : Card.Rank.values()) tmp.add(new Card(r, s));
+        }
+        Collections.shuffle(tmp, rnd);
+        cards.clear();
+        cards.addAll(tmp);
     }
 
     private void reshuffle() {

@@ -8,8 +8,8 @@ import java.util.*;
 
 @Data
 public class BjTable {
-    private Long id; // sera défini par la BD lors de la création persistée
-    private final String code; // null si publique
+    private Long id;
+    private final String code;
     private final boolean isPrivate;
     private final int maxSeats;
 
@@ -17,16 +17,13 @@ public class BjTable {
     private final Shoe shoe = new Shoe(6);
 
     private TablePhase phase = TablePhase.BETTING;
-
-    // dealer
     private final PlayerState dealer = new PlayerState();
 
-    // jeu courant
     private Integer currentSeatIndex = null;
     private Long phaseDeadlineEpochMs = 0L;
 
-    // nouveau : qui a créé la table (peut être null)
     private String creatorEmail;
+    private String creatorDisplayName; // ✅ ajouté
     private Instant createdAt = Instant.now();
 
     private String  name;
@@ -36,15 +33,9 @@ public class BjTable {
     private boolean pendingClose = false;
     private Instant lastActiveAt = Instant.now();
 
-    public boolean isPendingClose() {
-        return pendingClose;
-    }
-    public void setPendingClose(boolean pendingClose) {
-        this.pendingClose = pendingClose;
-    }
+    public boolean isPendingClose() { return pendingClose; }
+    public void setPendingClose(boolean pendingClose) { this.pendingClose = pendingClose; }
 
-
-    // constructeur : id peut être null (on récupère l'id DB si présent)
     public BjTable(Long id, int maxSeats, boolean isPrivate, String code) {
         this.id = id;
         this.maxSeats = maxSeats;
@@ -53,7 +44,6 @@ public class BjTable {
         for (int i = 0; i < maxSeats; i++) seats.put(i, new Seat());
     }
 
-    // fallback si on veut construire sans id (compatibilité)
     public BjTable(int maxSeats, boolean isPrivate, String code) {
         this(null, maxSeats, isPrivate, code);
     }

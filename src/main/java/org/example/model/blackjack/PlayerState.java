@@ -29,4 +29,9 @@ public class PlayerState {
         if (cards.size() == 2 && total == 21) blackjack = true;
         if (total > 21) busted = true;
     }
+
+    public void setBet(long bet) {
+        this.bet = Math.max(0, bet);
+    }
+
 }

@@ -42,9 +42,7 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
 
             // 2) Vérifie la validité
             if (token == null || token.isBlank() || !jwtUtil.validerToken(token)) {
-                System.out.println("❌ Rejet WS: token manquant ou invalide depuis " + req.getRemoteAddr());
                 response.setStatusCode(HttpStatus.UNAUTHORIZED);
-                response.getBody().write("Unauthorized WebSocket connection".getBytes());
                 return false; // ⛔ stoppe la connexion
             }
             // 3) Stocke le token dans la session WS (utilisable plus tard)

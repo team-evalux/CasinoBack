@@ -23,18 +23,13 @@ public class BjWsController {
     private final JwtUtil jwtUtil;
     private final SimpMessagingTemplate broker;
 
-    // 🔒 Un verrou (objet) par table pour ordonner les accès concurrents
     private final Map<Long, Object> tableLocks = new ConcurrentHashMap<>();
-
     private Object getTableLock(Long tableId) {
         return tableLocks.computeIfAbsent(tableId, id -> new Object());
     }
 
-    // ----------------------------------------------------------------
-    // Résolution de l'email à partir du Principal ou du token JWT
     private String resolveEmail(Principal principal, Message<?> msg) {
         if (principal != null) return principal.getName();
-
         StompHeaderAccessor acc = StompHeaderAccessor.wrap(msg);
         String token = null;
 
@@ -59,7 +54,7 @@ public class BjWsController {
     }
 
     // ----------------------------------------------------------------
-    // JOINDRE OU CRÉER UNE TABLE
+    // JOINDRE (ou CRÉER) = entrer + auto-seat (refus si table pleine)
     @MessageMapping("/bj/join")
     public void join(JoinOrCreateMsg msg, Principal principal, Message<?> message) {
         String email = resolveEmail(principal, message);
@@ -80,10 +75,9 @@ public class BjWsController {
                 msg.setCode(headerCode);
             }
 
-            // 🔒 On empêche plusieurs JOIN concurrents sur la même table
             Long lockId = msg.getTableId() != null ? Long.valueOf(msg.getTableId().toString()) : -1L;
             synchronized (getTableLock(lockId)) {
-                service.joinOrCreate(email, msg);
+                service.joinOrCreate(email, msg); // fait l’enter + auto-seat en interne
                 System.out.println("JOIN reçu -> tableId=" + msg.getTableId() + ", code=" + msg.getCode() + ", from=" + email);
             }
 
@@ -95,7 +89,7 @@ public class BjWsController {
     }
 
     // ----------------------------------------------------------------
-    // S'ASSEOIR À UNE TABLE
+    // /bj/sit : compat → no-op fonctionnel (re-passe par enter)
     @MessageMapping("/bj/sit")
     public void sit(SitMsg msg, Principal principal, Message<?> message) {
         String email = resolveEmail(principal, message);
@@ -112,25 +106,12 @@ public class BjWsController {
                     if (ch != null && !ch.isEmpty()) code = ch.get(0);
                 } catch (ClassCastException ignored) {}
             }
-
             if ((code == null || code.isBlank()) && acc.getSessionAttributes() != null) {
                 Object sc = acc.getSessionAttributes().get("code");
                 if (sc instanceof String s && !s.isBlank()) code = s;
             }
-
-            if ((code == null || code.isBlank())) {
-                try {
-                    java.lang.reflect.Method m = msg.getClass().getMethod("getCode");
-                    Object val = m.invoke(msg);
-                    if (val instanceof String s && !s.isBlank()) code = s;
-                } catch (NoSuchMethodException ignored) {}
-            }
-
             if ((msg.getCode() == null || msg.getCode().isBlank()) && code != null && !code.isBlank()) {
-                try {
-                    java.lang.reflect.Method sm = msg.getClass().getMethod("setCode", String.class);
-                    sm.invoke(msg, code);
-                } catch (NoSuchMethodException ignored) {}
+                try { msg.getClass().getMethod("setCode", String.class).invoke(msg, code); } catch (Exception ignored) {}
             }
 
             Long tableId = msg.getTableId();
@@ -140,14 +121,15 @@ public class BjWsController {
                 return;
             }
 
-            // 🔒 Bloc synchronized pour éviter que deux joueurs s’assoient en même temps sur la même table
             synchronized (getTableLock(tableId)) {
-                boolean ok = service.authorizeEmailForTable(tableId, email, code);
+                // On garde la vérification d’accès pour les privées (compat)
+                boolean ok = service.authorizeEmailForTable(tableId, email, msg.getCode());
                 if (!ok) {
                     broker.convertAndSendToUser(email, "/queue/bj/errors",
                             Map.of("error", "Code d'accès invalide pour cette table privée"));
                     return;
                 }
+                // No-op réel (auto-seat déjà fait au JOIN) — mais idempotent:
                 service.sit(email, tableId, msg.getSeatIndex());
             }
 

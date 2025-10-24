@@ -29,7 +29,7 @@ public class BjLobbyController {
             row.put("name",         t.getName());
             row.put("minBet",       t.getMinBet());
             row.put("maxBet",       t.getMaxBet());
-            row.put("creatorEmail", t.getCreatorEmail());   // ✅ exposé
+            row.put("creatorEmail", t.getCreatorEmail());
             out.add(row);
         }
         return ResponseEntity.ok(out);
@@ -46,7 +46,7 @@ public class BjLobbyController {
         out.put("name",         t.getName());
         out.put("minBet",       t.getMinBet());
         out.put("maxBet",       t.getMaxBet());
-        out.put("creatorEmail", t.getCreatorEmail());   // ✅ exposé aussi ici
+        out.put("creatorEmail", t.getCreatorEmail());
         if (t.isPrivate() && principal != null && Objects.equals(principal.getName(), t.getCreatorEmail())) {
             out.put("code", t.getCode());
         }
@@ -73,17 +73,18 @@ public class BjLobbyController {
             out.put("name", t.getName());
             out.put("minBet", t.getMinBet());
             out.put("maxBet", t.getMaxBet());
-            out.put("creatorEmail", t.getCreatorEmail());   // ✅ ajouté
+            out.put("creatorEmail", t.getCreatorEmail());
             if (t.getCode() != null && creator != null && creator.equals(t.getCreatorEmail())) {
                 out.put("code", t.getCode());
             }
             return ResponseEntity.ok(out);
-        }  catch (IllegalStateException ise) {
-        return ResponseEntity.badRequest().body(Map.of("error", ise.getMessage()));
-    } catch (IllegalArgumentException iae) {
-        return ResponseEntity.badRequest().body(Map.of("error", iae.getMessage()));
+
+        } catch (IllegalStateException ise) {
+            return ResponseEntity.badRequest().body(Map.of("error", ise.getMessage()));
+        } catch (IllegalArgumentException iae) {
+            return ResponseEntity.badRequest().body(Map.of("error", iae.getMessage()));
+        }
     }
-}
 
     @DeleteMapping("/table/{id}")
     public ResponseEntity<?> close(@PathVariable Long id, Principal principal) {
