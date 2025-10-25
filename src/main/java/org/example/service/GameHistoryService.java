@@ -9,6 +9,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
+import org.springframework.transaction.annotation.Transactional;
+
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -115,6 +117,7 @@ public class GameHistoryService {
      *
      * outcome: can be any string (kept as-is in entry.outcome)
      */
+    @Transactional
     public synchronized void record(Utilisateur u, String game, String outcome, long montantJoue, long montantGagne, Integer multiplier) {
         if (u == null || game == null) return;
         Long userId = u.getId();
@@ -181,21 +184,19 @@ public class GameHistoryService {
             String game = kv.getKey();
             List<Entry> list = kv.getValue();
             if (list == null) continue;
-            for (Entry e : list) {
-                all.add(new HistoryRecord(
-                        e.id,
-                        game,
-                        e.outcome,
-                        e.montantJoue,
-                        e.montantGagne,
-                        e.multiplier,
-                        isoOfEpochMilli(e.createdAt)
-                ));
-            }
+
+            // TRIE par epoch ici
+            list.stream()
+                    .sorted(Comparator.comparingLong((Entry e) -> e.createdAt).reversed())
+                    .limit(limit) // tu peux limiter par jeu si tu veux
+                    .forEach(e -> all.add(new HistoryRecord(
+                            e.id, game, e.outcome, e.montantJoue, e.montantGagne, e.multiplier, isoOfEpochMilli(e.createdAt)
+                    )));
         }
 
+        // Puis re-trie le mix final et limite globalement
         return all.stream()
-                .sorted(Comparator.comparing((HistoryRecord r) -> r.createdAt).reversed())
+                .sorted(Comparator.comparing((HistoryRecord r) -> r.createdAt).reversed()) // ou refais un tri par epoch si tu ajoutes createdAtMs
                 .limit(limit)
                 .collect(Collectors.toList());
     }

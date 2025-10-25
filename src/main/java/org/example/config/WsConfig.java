@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.web.socket.config.annotation.*;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 @Configuration
 @EnableWebSocketMessageBroker
@@ -25,13 +26,30 @@ public class WsConfig implements WebSocketMessageBrokerConfigurer {
     }
 
     @Override
+    public void configureWebSocketTransport(WebSocketTransportRegistration registry) {
+        registry
+                .setMessageSizeLimit(64 * 1024)        // 64KB par frame
+                .setSendBufferSizeLimit(512 * 1024)    // 512KB buffer côté serveur
+                .setSendTimeLimit(15_000);             // 15s max d’envoi
+    }
+
+    private ThreadPoolTaskScheduler heartbeatScheduler() {
+        ThreadPoolTaskScheduler ts = new ThreadPoolTaskScheduler();
+        ts.setPoolSize(1);
+        ts.setThreadNamePrefix("ws-heartbeat-");
+        ts.initialize();
+        return ts;
+    }
+
+    @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
-        // Important : expose /queue pour les destinations user (convertAndSendToUser)
-        registry.enableSimpleBroker("/topic", "/queue");
+        var simple = registry.enableSimpleBroker("/topic", "/queue");
+        simple.setTaskScheduler(heartbeatScheduler());
+        simple.setHeartbeatValue(new long[]{10_000, 10_000}); // server<->client 10s
         registry.setApplicationDestinationPrefixes("/app");
-        // important pour les destinations user (client s'abonne sur /user/queue/...)
         registry.setUserDestinationPrefix("/user");
     }
+
 
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
