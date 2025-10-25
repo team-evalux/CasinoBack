@@ -8,6 +8,6 @@ import java.util.List;
 import java.util.Optional;
 
 public interface GameHistoryAggregateRepository extends JpaRepository<GameHistoryAggregate, Long> {
-    List<GameHistoryAggregate> findByUtilisateurId(Long utilisateurId);
     Optional<GameHistoryAggregate> findByUtilisateurIdAndGame(Long utilisateurId, String game);
+    List<GameHistoryAggregate> findByUtilisateurId(Long utilisateurId);
 }

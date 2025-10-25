@@ -13,10 +13,12 @@ import org.example.service.blackjack.util.Payloads;
 import org.example.service.blackjack.util.Timeouts;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.*;
 
+// src/main/java/org/example/service/blackjack/engine/PayoutService.java
 @Service
 @RequiredArgsConstructor
 public class PayoutService {
@@ -24,31 +26,56 @@ public class PayoutService {
     private final UtilisateurRepository users;
     private final GameHistoryService history;
 
+    @Transactional
     public List<Map<String,Object>> computeAndPay(BjTable t) {
-        int dealerTotal = t.getDealer().bestTotal();
-        boolean dealerBust = dealerTotal > 21;
         List<Map<String, Object>> pay = new ArrayList<>();
 
         for (Map.Entry<Integer, Seat> e : t.getSeats().entrySet()) {
-            Seat s = e.getValue();
-            long bet = s.getHand().getBet();
+            final Integer seatIndex = e.getKey();
+            final Seat s = e.getValue();
+            final long bet = s.getHand().getBet();
             if (bet <= 0) continue;
 
-            PayoutRules.Outcome o = PayoutRules.compute(s.getHand(), t.getDealer(), bet);
-            long credit = o.credit();
-            String outcome = o.outcome();
+            var o = PayoutRules.compute(s.getHand(), t.getDealer(), bet);
+            final long credit = o.credit();
+            final String outcome = o.outcome();
 
-            if (credit > 0) {
-                Utilisateur u = users.findByEmail(s.getEmail()).orElseThrow();
-                wallet.crediter(u, credit);
+            // 1 seul lookup utilisateur
+            Utilisateur u = users.findByEmail(s.getEmail()).orElse(null);
+
+            // Paiement (si utilisateur trouvé)
+            if (credit > 0 && u != null) {
+                try { wallet.crediter(u, credit); }
+                catch (Exception ex) { /* log.warn si tu veux */ }
             }
-            try {
-                Utilisateur u = users.findByEmail(s.getEmail()).orElseThrow();
-                int multiplier = switch (outcome) { case "BLACKJACK" -> 3; case "WIN" -> 2; case "PUSH" -> 1; default -> 0; };
-                history.record(u, "blackjack", "total="+s.getHand().bestTotal()+",outcome="+outcome, bet, credit, multiplier);
-            } catch (Exception ignored){}
 
-            pay.add(Map.of("seat", e.getKey(), "bet", bet, "credit", credit, "total", s.getHand().bestTotal(), "outcome", outcome));
+            // Historique (même si crédit 0) — protège si u == null
+            if (u != null) {
+                int multiplier = switch (outcome) {
+                    case "BLACKJACK" -> 3;
+                    case "WIN"       -> 2;
+                    case "PUSH"      -> 1;
+                    default          -> 0;
+                };
+                try {
+                    history.record(
+                            u,
+                            "blackjack",
+                            "total="+s.getHand().bestTotal()+",outcome="+outcome,
+                            bet,
+                            credit,
+                            multiplier
+                    );
+                } catch (Exception ex) { /* log.warn si besoin */ }
+            }
+
+            pay.add(Map.of(
+                    "seat", seatIndex,
+                    "bet", bet,
+                    "credit", credit,
+                    "total", s.getHand().bestTotal(),
+                    "outcome", outcome
+            ));
         }
         return pay;
     }
