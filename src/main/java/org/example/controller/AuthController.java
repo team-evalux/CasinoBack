@@ -29,10 +29,10 @@ public class AuthController {
     @PostMapping("/register/send-code")
     public ResponseEntity<?> envoyerCodeInscription(@RequestBody EmailDTO req) {
         if (utilisateurService.trouverParEmail(req.email) != null) {
-            return ResponseEntity.badRequest().body(Map.of("error","Email déjà utilisé"));
+            return ResponseEntity.badRequest().body(Map.of("message","Email déjà utilisé"));
         }
         if (utilisateurService.trouverParPseudo(req.pseudo) != null) {
-            return ResponseEntity.badRequest().body(Map.of("error","Pseudo déjà utilisé"));
+            return ResponseEntity.badRequest().body(Map.of("message","Pseudo déjà utilisé"));
         }
         verificationService.envoyerCode(req.email, VerificationCode.Type.REGISTER);
         return ResponseEntity.ok(Map.of("message", "Code envoyé à " + req.email));
@@ -62,7 +62,7 @@ public class AuthController {
     public ResponseEntity<?> envoyerCodeReset(@RequestBody EmailDTO req) {
         Utilisateur u = utilisateurService.trouverParEmail(req.email);
         if (u == null)
-            return ResponseEntity.badRequest().body(Map.of("error", "Aucun compte trouvé pour cet email"));
+            return ResponseEntity.badRequest().body(Map.of("message", "Aucun compte trouvé pour cet email"));
 
         verificationService.envoyerCode(req.email, VerificationCode.Type.RESET_PASSWORD);
         return ResponseEntity.ok(Map.of("message", "Code envoyé"));
@@ -73,7 +73,7 @@ public class AuthController {
     public ResponseEntity<?> resetPassword(@RequestBody ResetPasswordDTO req) {
         boolean ok = verificationService.verifierCode(req.email, req.code, VerificationCode.Type.RESET_PASSWORD);
         if (!ok) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Code invalide ou expiré"));
+            return ResponseEntity.badRequest().body(Map.of("message", "Code invalide ou expiré"));
         }
 
         utilisateurService.mettreAJourMotDePasse(req.email, req.nouveauMotDePasse);
