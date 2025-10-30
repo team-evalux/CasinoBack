@@ -2,7 +2,7 @@ package org.example.security;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.*;
-import org.springframework.http.HttpMethod; // <— ajoute ça
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -35,38 +35,55 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http.csrf(csrf -> csrf.disable());
-        http.cors(cors -> cors.configurationSource(corsConfigurationSource()));
-        http.sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
+        http
+                // API stateless
+                .csrf(csrf -> csrf.disable())
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
-        http.authorizeHttpRequests(auth -> auth
-                // préflight navigateur
-                .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                .authorizeHttpRequests(auth -> auth
+                        // Préflight CORS
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-                // public
-                .requestMatchers("/api/auth/**", "/h2-console/**", "/ws/**").permitAll()
+                        // Public (auth)
+                        .requestMatchers("/api/auth/**").permitAll()
 
-                // endpoints bonus (auth requis)
-                .requestMatchers("/api/bonus/**").authenticated()
+                        // H2 console + websockets (dev)
+                        .requestMatchers("/h2-console/**", "/ws/**").permitAll()
 
-                // blackjack (auth requis ; tu peux mettre hasAnyRole("USER","ADMIN") si tu préfères)
-                .requestMatchers("/api/bj/**").authenticated()
+                        // BONUS (auth requis) : status + claim
+                        .requestMatchers(HttpMethod.GET,  "/api/bonus/status").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/bonus/claim").authenticated()
 
-                // le reste
-                .anyRequest().authenticated()
-        );
+                        // Blackjack (auth requis)
+                        .requestMatchers("/api/bj/**").authenticated()
 
+                        // Tout le reste : protégé par défaut
+                        .anyRequest().authenticated()
+                );
+
+        // H2 console en frame (dev)
         http.headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()));
+
+        // JWT
         http.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+
         return http.build();
     }
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowCredentials(true);
+
+        // Autorise l'appli Angular locale
         config.setAllowedOrigins(List.of("http://localhost:4200"));
-        config.setAllowedHeaders(List.of("*"));
+        config.setAllowCredentials(true);
+
+        // Autorise les en-têtes usuels (dont Authorization pour le JWT)
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "Origin"));
+        config.setExposedHeaders(List.of("Authorization"));
+
+        // Méthodes
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

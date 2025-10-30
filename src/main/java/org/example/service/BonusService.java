@@ -1,6 +1,6 @@
-// src/main/java/org/example/service/BonusService.java
 package org.example.service;
 
+import org.example.dto.BonusStatusDTO;
 import org.example.model.Utilisateur;
 import org.example.model.Wallet;
 import org.example.repo.UtilisateurRepository;
@@ -23,6 +23,22 @@ public class BonusService {
     @Autowired
     private WalletService walletService;
 
+    // --- NOUVEAU : statut courant ---
+    public BonusStatusDTO getStatus(Utilisateur u) {
+        Instant now = Instant.now();
+        Instant lastReset = getLastResetInstant();
+        boolean canClaim = (u.getLastBonusClaim() == null) || u.getLastBonusClaim().isBefore(lastReset);
+        Instant nextReset = lastReset.plus(Duration.ofDays(1));
+
+        return BonusStatusDTO.builder()
+                .canClaim(canClaim)
+                .lastClaimEpochMs(u.getLastBonusClaim() != null ? u.getLastBonusClaim().toEpochMilli() : null)
+                .nextResetEpochMs(nextReset.toEpochMilli())
+                .serverNowEpochMs(now.toEpochMilli())
+                .amount(BONUS_AMOUNT)
+                .build();
+    }
+
     public Wallet claimDailyBonus(Utilisateur u) {
         Instant now = Instant.now();
         Instant lastReset = getLastResetInstant();
@@ -31,25 +47,19 @@ public class BonusService {
             throw new IllegalStateException("Bonus déjà réclamé pour aujourd'hui.");
         }
 
-        // crédite le compte
         Wallet w = walletService.crediter(u, BONUS_AMOUNT);
-
-        // enregistre la date du claim
         u.setLastBonusClaim(now);
         utilisateurRepo.save(u);
-
         return w;
     }
 
+    // reset quotidien (Paris) -> dernier reset effectif
     private Instant getLastResetInstant() {
         ZonedDateTime parisNow = ZonedDateTime.now(PARIS_TZ);
-
         ZonedDateTime resetToday = parisNow.withHour(RESET_HOUR).withMinute(RESET_MIN).withSecond(0).withNano(0);
-
         if (parisNow.isBefore(resetToday)) {
             resetToday = resetToday.minusDays(1);
         }
-
         return resetToday.toInstant();
     }
 }
