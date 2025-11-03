@@ -1,17 +1,17 @@
 // src/main/java/org/example/controller/HistoryController.java
 package org.example.controller;
 
-import org.example.model.GameHistory;
 import org.example.model.Utilisateur;
 import org.example.repo.UtilisateurRepository;
 import org.example.service.GameHistoryService;
+import org.example.service.GameHistoryService.HistoryRecord;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/history")
@@ -31,26 +31,14 @@ public class HistoryController {
 
         Utilisateur u = utilisateurRepo.findByEmail(authentication.getName()).orElseThrow();
 
-        List<GameHistory> list;
+        List<HistoryRecord> list;
         if (game == null || game.isBlank()) {
             list = historyService.recentForUser(u, limit);
         } else {
             list = historyService.recentForUserByGame(u, game.trim(), limit);
         }
 
-        List<Map<String,Object>> out = list.stream().map(h -> {
-            Map<String,Object> m = new HashMap<>();
-            m.put("id", h.getId());
-            m.put("game", h.getGame());
-            m.put("outcome", h.getOutcome());
-            m.put("montantJoue", h.getMontantJoue());
-            m.put("montantGagne", h.getMontantGagne());
-            m.put("multiplier", h.getMultiplier());
-            m.put("createdAt", h.getCreatedAt());
-            return m;
-        }).collect(Collectors.toList());
-
-        return ResponseEntity.ok(out);
+        return ResponseEntity.ok(list);
     }
 
     @GetMapping("/me/summary")
@@ -59,20 +47,8 @@ public class HistoryController {
             Authentication authentication) {
 
         Utilisateur u = utilisateurRepo.findByEmail(authentication.getName()).orElseThrow();
-        List<GameHistory> list = historyService.recentForUser(u, limit);
+        List<HistoryRecord> list = historyService.recentForUser(u, limit);
 
-        List<Map<String,Object>> items = list.stream().map(h -> {
-            Map<String,Object> m = new HashMap<>();
-            m.put("id", h.getId());
-            m.put("game", h.getGame());
-            m.put("outcome", h.getOutcome());
-            m.put("montantJoue", h.getMontantJoue());
-            m.put("montantGagne", h.getMontantGagne());
-            m.put("multiplier", h.getMultiplier());
-            m.put("createdAt", h.getCreatedAt());
-            return m;
-        }).collect(Collectors.toList());
-
-        return ResponseEntity.ok(Map.of("items", items));
+        return ResponseEntity.ok(Map.of("items", list));
     }
 }

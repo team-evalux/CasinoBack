@@ -8,13 +8,15 @@ public class SlotConfigResponse {
     public List<List<Integer>> reelWeights;
     public int reelsCount;
     public Map<Integer,Integer> payouts;
+    public Map<String, Double> symbolValues; // <- NEW
 
     public SlotConfigResponse() {}
 
-    public SlotConfigResponse(List<String> symbols, List<List<Integer>> reelWeights, int reelsCount, Map<Integer,Integer> payouts) {
+    public SlotConfigResponse(List<String> symbols, List<List<Integer>> reelWeights, int reelsCount, Map<Integer,Integer> payouts, Map<String, Double> symbolValues) {
         this.symbols = symbols;
         this.reelWeights = reelWeights;
         this.reelsCount = reelsCount;
         this.payouts = payouts;
+        this.symbolValues = symbolValues;
     }
 }

@@ -5,4 +5,6 @@ public class RegisterRequest {
     public String email;
     public String pseudo;
     public String motDePasse;
+
+    public String code;
 }

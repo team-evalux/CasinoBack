@@ -2,6 +2,7 @@ package org.example.security;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.*;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -16,9 +17,6 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.List;
 
-/**
- * Configuration de sécurité (version correcte pour servlet / non-reactive).
- */
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {
@@ -37,20 +35,37 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http.csrf(csrf -> csrf.disable());
+        http
+                // API stateless
+                .csrf(csrf -> csrf.disable())
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
-        // activer CORS et fournir la source de configuration
-        http.cors(cors -> cors.configurationSource(corsConfigurationSource()));
+                .authorizeHttpRequests(auth -> auth
+                        // Préflight CORS
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-        http.sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
+                        // Public (auth)
+                        .requestMatchers("/api/auth/**").permitAll()
 
-        http.authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/auth/*", "/h2-console/*").permitAll()
-                .requestMatchers("/api/bonus/**").authenticated()
-                .anyRequest().authenticated()
-        );
+                        // H2 console + websockets (dev)
+                        .requestMatchers("/h2-console/**", "/ws/**").permitAll()
 
+                        // BONUS (auth requis) : status + claim
+                        .requestMatchers(HttpMethod.GET,  "/api/bonus/status").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/bonus/claim").authenticated()
+
+                        // Blackjack (auth requis)
+                        .requestMatchers("/api/bj/**").authenticated()
+
+                        // Tout le reste : protégé par défaut
+                        .anyRequest().authenticated()
+                );
+
+        // H2 console en frame (dev)
         http.headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()));
+
+        // JWT
         http.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
@@ -60,14 +75,16 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
 
-        // Pour le développement : autoriser ton front Angular (localhost:4200)
-        config.setAllowCredentials(true);
+        // Autorise l'appli Angular locale
         config.setAllowedOrigins(List.of("http://localhost:4200"));
-        config.setAllowedHeaders(List.of("*"));
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
+        config.setAllowCredentials(true);
 
-        // si tu veux autoriser tout (attention en prod) :
-        // config.setAllowedOrigins(List.of("*"));
+        // Autorise les en-têtes usuels (dont Authorization pour le JWT)
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "Origin"));
+        config.setExposedHeaders(List.of("Authorization"));
+
+        // Méthodes
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
