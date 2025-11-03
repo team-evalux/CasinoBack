@@ -1,6 +1,6 @@
 package org.example.security;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.*;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -11,10 +11,9 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.cors.CorsConfigurationSource;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.web.cors.*;
 
+import java.util.Arrays;
 import java.util.List;
 
 @Configuration
@@ -23,10 +22,13 @@ public class SecurityConfig {
 
     private final JwtFilter jwtFilter;
 
-    @Autowired
     public SecurityConfig(JwtFilter jwtFilter) {
         this.jwtFilter = jwtFilter;
     }
+
+    // Liste d’origines autorisées (env/properties)
+    @Value("${app.cors.allowed-origins:http://localhost:4200}")
+    private String allowedOriginsProp;
 
     @Bean
     public BCryptPasswordEncoder passwordEncoder() {
@@ -36,55 +38,45 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                // API stateless
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-
                 .authorizeHttpRequests(auth -> auth
-                        // Préflight CORS
+                        // Préflight
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-                        // Public (auth)
+                        // Auth public
                         .requestMatchers("/api/auth/**").permitAll()
 
-                        // H2 console + websockets (dev)
-                        .requestMatchers("/h2-console/**", "/ws/**").permitAll()
+                        // WebSocket endpoint (handshake public, l’intercepteur JWT fera le tri)
+                        .requestMatchers("/ws/**").permitAll()
 
-                        // BONUS (auth requis) : status + claim
+                        // Bonus / Blackjack : authentifiés
                         .requestMatchers(HttpMethod.GET,  "/api/bonus/status").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/bonus/claim").authenticated()
-
-                        // Blackjack (auth requis)
                         .requestMatchers("/api/bj/**").authenticated()
 
-                        // Tout le reste : protégé par défaut
+                        // Tout le reste
                         .anyRequest().authenticated()
                 );
 
-        // H2 console en frame (dev)
-        http.headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()));
-
-        // JWT
         http.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
-
         return http.build();
     }
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
+        List<String> origins = Arrays.stream(allowedOriginsProp.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .toList();
+
         CorsConfiguration config = new CorsConfiguration();
-
-        // Autorise l'appli Angular locale
-        config.setAllowedOrigins(List.of("http://localhost:4200"));
+        config.setAllowedOrigins(origins);
         config.setAllowCredentials(true);
-
-        // Autorise les en-têtes usuels (dont Authorization pour le JWT)
-        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "Origin"));
+        config.setAllowedMethods(List.of("GET","POST","PUT","DELETE","PATCH","OPTIONS"));
+        config.setAllowedHeaders(List.of("Authorization","Content-Type","Accept","Origin"));
         config.setExposedHeaders(List.of("Authorization"));
-
-        // Méthodes
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
@@ -92,7 +84,7 @@ public class SecurityConfig {
     }
 
     @Bean
-    public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
-        return config.getAuthenticationManager();
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration cfg) throws Exception {
+        return cfg.getAuthenticationManager();
     }
 }
