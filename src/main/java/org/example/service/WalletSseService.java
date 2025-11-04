@@ -1,11 +1,12 @@
+// src/main/java/org/example/service/WalletSseService.java
 package org.example.service;
 
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -14,7 +15,8 @@ public class WalletSseService {
     private final Map<String, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
 
     public SseEmitter register(String email) {
-        SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
+        // 30 minutes : suffisant et plus réaliste que Long.MAX_VALUE derrière proxy
+        SseEmitter emitter = new SseEmitter(30 * 60 * 1000L);
         emitters.computeIfAbsent(email, k -> new CopyOnWriteArrayList<>()).add(emitter);
 
         emitter.onCompletion(() -> removeEmitter(email, emitter));
@@ -47,6 +49,21 @@ public class WalletSseService {
                         .data(Map.of("solde", solde)));
             } catch (IOException e) {
                 removeEmitter(email, emitter);
+            }
+        }
+    }
+
+    // Heartbeat toutes les 15s pour garder le flux ouvert derrière Nginx/proxies
+    @Scheduled(fixedDelay = 15000)
+    public void heartbeat() {
+        for (var entry : emitters.entrySet()) {
+            String email = entry.getKey();
+            for (SseEmitter emitter : entry.getValue().toArray(new SseEmitter[0])) {
+                try {
+                    emitter.send(SseEmitter.event().name("ping").data("keepalive"));
+                } catch (IOException e) {
+                    removeEmitter(email, emitter);
+                }
             }
         }
     }
