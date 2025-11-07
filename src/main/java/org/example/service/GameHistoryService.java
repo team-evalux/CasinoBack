@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.model.GameHistoryAggregate;
 import org.example.model.Utilisateur;
 import org.example.repo.GameHistoryAggregateRepository;
+import org.example.repo.UtilisateurRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -25,6 +26,11 @@ public class GameHistoryService {
 
     @Autowired
     private GameHistoryAggregateRepository repo;
+
+
+    @Autowired
+    private UtilisateurRepository utilisateurrepo;
+
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -240,4 +246,26 @@ public class GameHistoryService {
                 .limit(limit)
                 .collect(Collectors.toList());
     }
+
+
+    @Transactional
+    public synchronized void deleteAllForUser(Utilisateur u) {
+        if (u == null) return;
+        Long userId = u.getId();
+        if (userId == null) return;
+
+        // 1) Purge du cache mémoire pour cet utilisateur
+        cache.remove(userId);
+
+        // 2) Suppression en base
+        // Si vous avez un repo avec deleteByUtilisateurId(userId), vous pouvez l'utiliser directement.
+        utilisateurrepo.deleteById(userId);
+
+        // Fallback générique : on récupère puis on supprime tout
+        List<GameHistoryAggregate> ags = repo.findByUtilisateurId(userId);
+        if (ags != null && !ags.isEmpty()) {
+            repo.deleteAll(ags);
+        }
+    }
+
 }

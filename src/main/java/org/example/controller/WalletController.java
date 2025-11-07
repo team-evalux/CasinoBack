@@ -60,4 +60,12 @@ public class WalletController {
         String email = authentication.getName();
         return walletSseService.register(email);
     }
+
+    @DeleteMapping("/me")
+    public ResponseEntity<?> supprimerMonWallet(Authentication authentication){
+        String email = authentication.getName();
+        Utilisateur u = utilisateurRepo.findByEmail(email).orElseThrow();
+        walletService.supprimerWallet(u);
+        return ResponseEntity.noContent().build();
+    }
 }

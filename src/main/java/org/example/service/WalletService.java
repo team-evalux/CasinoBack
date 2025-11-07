@@ -48,10 +48,14 @@ public class WalletService {
         return w;
     }
 
-    public long getBalance(Long userId) {
-        Utilisateur user = utilisateurRepo.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("Utilisateur introuvable"));
-        Wallet w = getWalletParUtilisateur(user);
-        return w.getSolde();
+    @Transactional
+    public void supprimerWallet(Utilisateur u){
+        try {
+            // optionnel : fermer les SSE côté client
+            walletSseService.complete(u.getEmail());
+        } catch (Exception ignore) {}
+
+        walletRepo.deleteByUtilisateur(u);
     }
+
 }
