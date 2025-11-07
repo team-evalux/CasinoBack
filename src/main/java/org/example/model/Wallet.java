@@ -15,8 +15,10 @@ public class Wallet {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @OneToOne
-    @JoinColumn(name = "utilisateur_id", nullable = false, unique = true)
+
+
+    @OneToOne(optional = false)
+    @JoinColumn(name = "utilisateur_id", nullable = false)
     private Utilisateur utilisateur;
 
     @Column(nullable = false)

@@ -47,4 +47,15 @@ public class WalletService {
         walletSseService.sendBalanceUpdate(u.getEmail(), w.getSolde());
         return w;
     }
+
+    @Transactional
+    public void supprimerWallet(Utilisateur u){
+        try {
+            // optionnel : fermer les SSE côté client
+            walletSseService.complete(u.getEmail());
+        } catch (Exception ignore) {}
+
+        walletRepo.deleteByUtilisateur(u);
+    }
+
 }

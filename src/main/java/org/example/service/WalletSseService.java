@@ -1,4 +1,3 @@
-// src/main/java/org/example/service/WalletSseService.java
 package org.example.service;
 
 import org.springframework.scheduling.annotation.Scheduled;
@@ -64,6 +63,20 @@ public class WalletSseService {
                 } catch (IOException e) {
                     removeEmitter(email, emitter);
                 }
+            }
+        }
+    }
+
+    /** Ferme tous les SSE d’un utilisateur (utilisé avant suppression) */
+    public void complete(String email) {
+        List<SseEmitter> list = emitters.remove(email);
+        if (list == null) return;
+
+        for (SseEmitter emitter : list) {
+            try {
+                emitter.complete();
+            } catch (Exception ignored) {
+
             }
         }
     }

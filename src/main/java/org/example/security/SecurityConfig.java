@@ -44,6 +44,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Préflight
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/wallet/stream").permitAll() // ⬅️ ajoute ceci
 
                         // Auth public
                         .requestMatchers("/api/auth/**").permitAll()

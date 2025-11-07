@@ -51,4 +51,11 @@ public class HistoryController {
 
         return ResponseEntity.ok(Map.of("items", list));
     }
+
+    @DeleteMapping("/me")
+    public ResponseEntity<?> deleteMyHistory(Authentication authentication) {
+        Utilisateur u = utilisateurRepo.findByEmail(authentication.getName()).orElseThrow();
+        historyService.deleteAllForUser(u);
+        return ResponseEntity.noContent().build();
+    }
 }
