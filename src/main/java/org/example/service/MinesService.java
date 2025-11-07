@@ -13,7 +13,7 @@ public class MinesService {
 
     public static final int GRID = 25;
     private static final double HOUSE_EDGE = 0.98;
-    private static final long TTL_MS = 60 * 1000L; // 1 minute avant expiration auto
+//    private static final long TTL_MS = 60 * 1000L; // 1 minute avant expiration auto
 
     private final SecureRandom random = new SecureRandom();
     private final Map<String, Round> rounds = new ConcurrentHashMap<>();
@@ -69,8 +69,8 @@ public class MinesService {
             return;
         }
 
-        long age = System.currentTimeMillis() - r.createdAt;
-        if (!r.active || age > TTL_MS) {
+//        long age = System.currentTimeMillis() - r.createdAt;
+        if (!r.active) {
             rounds.remove(id);
             sessionByUser.remove(email);
         } else {
@@ -90,11 +90,11 @@ public class MinesService {
         }
 
         // 💀 expire après TTL
-        if (System.currentTimeMillis() - r.createdAt > TTL_MS) {
-            rounds.remove(id);
-            sessionByUser.remove(u.getEmail());
-            return null;
-        }
+//        if (System.currentTimeMillis() - r.createdAt > TTL_MS) {
+//            rounds.remove(id);
+//            sessionByUser.remove(u.getEmail());
+//            return null;
+//        }
         return r;
     }
 
@@ -223,10 +223,10 @@ public class MinesService {
         for (Iterator<Map.Entry<String, Round>> it = rounds.entrySet().iterator(); it.hasNext(); ) {
             Map.Entry<String, Round> e = it.next();
             Round r = e.getValue();
-            if (!r.active || now - r.createdAt > TTL_MS) {
-                it.remove();
-                sessionByUser.remove(r.email);
-            }
+//            if (!r.active || now - r.createdAt > TTL_MS) {
+//                it.remove();
+//                sessionByUser.remove(r.email);
+//            }
         }
     }
 

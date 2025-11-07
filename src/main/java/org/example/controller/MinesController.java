@@ -26,14 +26,6 @@ public class MinesController {
 
     private static final int GRID = 25;
 
-    // ==================== CONFIGURATION ====================
-    @GetMapping("/config")
-    public ResponseEntity<?> config(@RequestParam int mines) {
-        int m = Math.max(1, Math.min(24, mines));
-        MinesConfigResponse resp = new MinesConfigResponse(GRID, m, 0.98, minesService.tableFor(m));
-        return ResponseEntity.ok(resp);
-    }
-
     // ==================== DÉMARRER PARTIE ====================
     @PostMapping("/start")
     @Transactional
