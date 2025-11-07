@@ -2,6 +2,7 @@ package org.example.service;
 
 import org.example.model.Utilisateur;
 import org.example.model.Wallet;
+import org.example.repo.UtilisateurRepository;
 import org.example.repo.WalletRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -15,7 +16,10 @@ public class WalletService {
     @Autowired
     private WalletSseService walletSseService;
 
-    public Wallet getWalletParUtilisateur(Utilisateur u){
+    @Autowired
+    private UtilisateurRepository utilisateurRepo;
+
+    public Wallet getWalletParUtilisateur(Utilisateur u) {
         return walletRepo.findByUtilisateur(u).orElseGet(() -> {
             Wallet w = Wallet.builder()
                     .utilisateur(u)
@@ -26,24 +30,20 @@ public class WalletService {
     }
 
     @Transactional
-    public Wallet crediter(Utilisateur u, long montant){
-        // ensure wallet exists
+    public Wallet crediter(Utilisateur u, long montant) {
         getWalletParUtilisateur(u);
         int updated = walletRepo.incrementSolde(u, montant);
         Wallet w = walletRepo.findByUtilisateur(u).orElseThrow();
-        // notifier via SSE
         walletSseService.sendBalanceUpdate(u.getEmail(), w.getSolde());
         return w;
     }
 
     @Transactional
-    public Wallet debiter(Utilisateur u, long montant){
-        // ensure wallet exists
+    public Wallet debiter(Utilisateur u, long montant) {
         getWalletParUtilisateur(u);
         int updated = walletRepo.decrementSoldeIfEnough(u, montant);
-        if(updated == 0) throw new IllegalArgumentException("Solde insuffisant");
+        if (updated == 0) throw new IllegalArgumentException("Solde insuffisant");
         Wallet w = walletRepo.findByUtilisateur(u).orElseThrow();
-        // notifier via SSE
         walletSseService.sendBalanceUpdate(u.getEmail(), w.getSolde());
         return w;
     }
