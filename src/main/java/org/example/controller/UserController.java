@@ -40,24 +40,20 @@ public class UserController {
                                                 Authentication authentication) {
         String emailAuth = authentication.getName();
         String emailConfirm = body != null ? body.get("emailConfirm") : null;
-        if (emailConfirm == null || !emailAuth.equalsIgnoreCase(emailConfirm)) {
+        if (!emailAuth.equalsIgnoreCase(emailConfirm)) {
             return ResponseEntity.status(403).body(Map.of("error", "Email de confirmation invalide"));
         }
 
         Utilisateur u = utilisateurRepo.findByEmail(emailAuth).orElseThrow();
-        System.out.println("1");
 
         // 1) historique
         historyService.deleteAllForUser(u);
-        System.out.println("2");
         // 2) wallet
         walletSseService.complete(u.getEmail());
 
         walletService.supprimerWallet(u);
-        System.out.println("3");
         // 3) utilisateur
         utilisateurRepo.delete(u);
-        System.out.println("4");
         // 204 No Content
         return ResponseEntity.noContent().build();
     }
