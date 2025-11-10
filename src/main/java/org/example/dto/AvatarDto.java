@@ -15,6 +15,7 @@ public class AvatarDto {
     private String rarete;   // "COMMUN" | "RARE" | "EPIQUE" | "LEGENDAIRE"
     private Long prix;
     private String imageUrl;
+    private boolean actif;
     private boolean defaut;
 
     public static AvatarDto fromEntity(Avatar avatar) {
@@ -26,6 +27,7 @@ public class AvatarDto {
                 .rarete(avatar.getRarete().name())
                 .prix(avatar.getPrix())
                 .imageUrl(avatar.getImageUrl())
+                .actif(avatar.isActif())
                 .defaut(avatar.isDefaut())
                 .build();
     }

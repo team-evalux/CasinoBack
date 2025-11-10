@@ -1,6 +1,7 @@
 package org.example.controller;
 
 import org.example.model.Utilisateur;
+import org.example.repo.UtilisateurAvatarRepository;
 import org.example.repo.UtilisateurRepository;
 import org.example.service.GameHistoryService;
 import org.example.service.UtilisateurService;
@@ -30,6 +31,10 @@ public class UserController {
     @Autowired
     private GameHistoryService historyService;
 
+
+    @Autowired
+    private UtilisateurAvatarRepository utilisateurAvatarRepo; // 👈
+
     /**
      * Supprime l'utilisateur connecté après confirmation d'e-mail.
      * Le front a déjà supprimé wallet + historique, mais on sécurise en les re-supprimant côté serveur.
@@ -48,6 +53,9 @@ public class UserController {
 
         // 1) historique
         historyService.deleteAllForUser(u);
+
+        utilisateurAvatarRepo.deleteByUtilisateur(u);
+
         // 2) wallet
         walletSseService.complete(u.getEmail());
 

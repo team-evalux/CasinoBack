@@ -13,6 +13,8 @@ import java.util.Optional;
 
 public interface UtilisateurAvatarRepository extends JpaRepository<UtilisateurAvatar, Long> {
 
+    long countByAvatar(Avatar avatar);
+
     List<UtilisateurAvatar> findByUtilisateur(Utilisateur utilisateur);
 
     boolean existsByUtilisateurAndAvatar(Utilisateur utilisateur, Avatar avatar);
@@ -24,4 +26,8 @@ public interface UtilisateurAvatarRepository extends JpaRepository<UtilisateurAv
     @Modifying
     @Query("update UtilisateurAvatar ua set ua.equipe = false where ua.utilisateur = :utilisateur and ua.equipe = true")
     void desequiperTout(@Param("utilisateur") Utilisateur utilisateur);
+
+    @Modifying
+    @Query("delete from UtilisateurAvatar ua where ua.utilisateur = :utilisateur")
+    void deleteByUtilisateur(@Param("utilisateur") Utilisateur utilisateur);
 }

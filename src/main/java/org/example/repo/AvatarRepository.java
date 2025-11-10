@@ -14,4 +14,8 @@ public interface AvatarRepository extends JpaRepository<Avatar, Long> {
     List<Avatar> findByActifTrueAndRareteOrderByPrixAsc(AvatarRarity rarete);
 
     Optional<Avatar> findFirstByActifTrueAndDefautTrue();
+
+    Optional<Avatar> findByCode(String code);
+
+    List<Avatar> findAllByOrderByIdAsc();
 }

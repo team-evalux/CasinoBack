@@ -1,6 +1,7 @@
 package org.example.service;
 
 import lombok.RequiredArgsConstructor;
+import org.example.dto.AvatarAdminRequest;
 import org.example.model.*;
 import org.example.repo.AvatarRepository;
 import org.example.repo.UtilisateurAvatarRepository;
@@ -99,4 +100,126 @@ public class AvatarShopService {
                     }
                 });
     }
+
+    // ====== ADMIN ======
+
+    public List<Avatar> listAllForAdmin() {
+        return avatarRepo.findAllByOrderByIdAsc();
+    }
+
+    @Transactional
+    public Avatar createAvatar(AvatarAdminRequest req) {
+        validateAdminRequest(req, true);
+
+        if (avatarRepo.findByCode(req.getCode()).isPresent()) {
+            throw new IllegalStateException("Code déjà utilisé");
+        }
+
+        AvatarRarity rarity = AvatarRarity.valueOf(req.getRarete().toUpperCase());
+
+        // Si on met defaut = true, on enlève le flag defaut des autres
+        if (req.isDefaut()) {
+            avatarRepo.findAll().forEach(a -> {
+                if (a.isDefaut()) {
+                    a.setDefaut(false);
+                }
+            });
+        }
+
+        Avatar avatar = Avatar.builder()
+                .code(req.getCode().trim())
+                .nom(req.getNom().trim())
+                .rarete(rarity)
+                .prix(req.getPrix())
+                .imageUrl(req.getImageUrl())
+                .actif(req.isActif())
+                .defaut(req.isDefaut())
+                .build();
+
+        return avatarRepo.save(avatar);
+    }
+
+    @Transactional
+    public Avatar updateAvatar(Long id, AvatarAdminRequest req) {
+        validateAdminRequest(req, false);
+
+        Avatar avatar = avatarRepo.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Avatar introuvable"));
+
+        // code unique si changé
+        if (req.getCode() != null && !req.getCode().isBlank()
+                && !req.getCode().equals(avatar.getCode())) {
+            if (avatarRepo.findByCode(req.getCode()).isPresent()) {
+                throw new IllegalStateException("Code déjà utilisé");
+            }
+            avatar.setCode(req.getCode().trim());
+        }
+
+        if (req.getNom() != null && !req.getNom().isBlank()) {
+            avatar.setNom(req.getNom().trim());
+        }
+
+        if (req.getRarete() != null) {
+            AvatarRarity rarity = AvatarRarity.valueOf(req.getRarete().toUpperCase());
+            avatar.setRarete(rarity);
+        }
+
+        if (req.getPrix() != null && req.getPrix() >= 0) {
+            avatar.setPrix(req.getPrix());
+        }
+
+        avatar.setActif(req.isActif());
+        avatar.setImageUrl(req.getImageUrl());
+
+        if (req.isDefaut()) {
+            // ce nouveau devient l'avatar par défaut
+            avatarRepo.findAll().forEach(a -> {
+                if (!a.getId().equals(avatar.getId()) && a.isDefaut()) {
+                    a.setDefaut(false);
+                }
+            });
+            avatar.setDefaut(true);
+        } else if (avatar.isDefaut() && !req.isDefaut()) {
+            // on autorise à retirer le flag defaut
+            avatar.setDefaut(false);
+        }
+
+        return avatarRepo.save(avatar);
+    }
+
+    @Transactional
+    public void disableAvatar(Long id) {
+        Avatar avatar = avatarRepo.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Avatar introuvable"));
+        avatar.setActif(false);
+        avatarRepo.save(avatar);
+    }
+
+    private void validateAdminRequest(AvatarAdminRequest req, boolean creation) {
+        if (creation) {
+            if (req.getCode() == null || req.getCode().isBlank())
+                throw new IllegalArgumentException("Code obligatoire");
+            if (req.getNom() == null || req.getNom().isBlank())
+                throw new IllegalArgumentException("Nom obligatoire");
+        }
+        if (req.getRarete() == null)
+            throw new IllegalArgumentException("Rareté obligatoire");
+        try {
+            AvatarRarity.valueOf(req.getRarete().toUpperCase());
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Rareté invalide");
+        }
+        if (req.getPrix() == null || req.getPrix() < 0)
+            throw new IllegalArgumentException("Prix invalide");
+    }
+
+    @Transactional
+    public Avatar setAvatarActive(Long id, boolean active) {
+        Avatar avatar = avatarRepo.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Avatar introuvable"));
+        avatar.setActif(active);
+        return avatarRepo.save(avatar);
+    }
+
+
 }
