@@ -48,6 +48,8 @@ public class SecurityConfig {
 
                         // Auth public
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/leaderboard/**").permitAll()
+
 
                         // WebSocket endpoint (handshake public, l’intercepteur JWT fera le tri)
                         .requestMatchers("/ws/**").permitAll()
