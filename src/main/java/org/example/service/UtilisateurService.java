@@ -17,6 +17,8 @@ public class UtilisateurService {
     private UtilisateurRepository utilisateurRepo;
     @Autowired
     private WalletRepository walletRepo;
+    @Autowired
+    private AvatarShopService avatarShopService;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     @Transactional
@@ -41,6 +43,8 @@ public class UtilisateurService {
                 .solde(1000L)
                 .build();
         walletRepo.save(w);
+
+        avatarShopService.assignerAvatarDefaut(saved);
 
         return saved;
     }

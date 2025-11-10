@@ -42,24 +42,25 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // Préflight
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/wallet/stream").permitAll() // ⬅️ ajoute ceci
-
-                        // Auth public
+                        .requestMatchers(HttpMethod.GET, "/api/wallet/stream").permitAll()
                         .requestMatchers("/api/auth/**").permitAll()
-
-                        // WebSocket endpoint (handshake public, l’intercepteur JWT fera le tri)
                         .requestMatchers("/ws/**").permitAll()
 
-                        // Bonus / Blackjack : authentifiés
-                        .requestMatchers(HttpMethod.GET,  "/api/bonus/status").authenticated()
+                        // Boutique : liste visible par tous (optionnel)
+                        .requestMatchers(HttpMethod.GET, "/api/avatars").permitAll()
+
+                        // Inventaire & achats : connecté obligatoire
+                        .requestMatchers("/api/inventory/**").authenticated()
+
+                        // Bonus / Blackjack
+                        .requestMatchers(HttpMethod.GET, "/api/bonus/status").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/bonus/claim").authenticated()
                         .requestMatchers("/api/bj/**").authenticated()
 
-                        // Tout le reste
                         .anyRequest().authenticated()
-                );
+                )
+        ;
 
         http.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
