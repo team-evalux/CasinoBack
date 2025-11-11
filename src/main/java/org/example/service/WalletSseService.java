@@ -15,7 +15,7 @@ public class WalletSseService {
 
     public SseEmitter register(String email) {
         // 30 minutes : suffisant et plus réaliste que Long.MAX_VALUE derrière proxy
-        SseEmitter emitter = new SseEmitter(30 * 60 * 1000L);
+        SseEmitter emitter = new SseEmitter(6L * 60 * 60 * 1000L);
         emitters.computeIfAbsent(email, k -> new CopyOnWriteArrayList<>()).add(emitter);
 
         emitter.onCompletion(() -> removeEmitter(email, emitter));
