@@ -6,9 +6,11 @@ import org.example.repo.UtilisateurRepository;
 import org.example.service.WalletService;
 import org.example.service.WalletSseService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.Map;
@@ -57,6 +59,9 @@ public class WalletController {
     // SSE stream pour le wallet de l'utilisateur (token peut être passé en header ou en query param)
     @GetMapping("/stream")
     public SseEmitter stream(Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Non authentifié");
+        }
         String email = authentication.getName();
         return walletSseService.register(email);
     }
