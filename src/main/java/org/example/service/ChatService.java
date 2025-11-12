@@ -16,6 +16,11 @@ public class ChatService {
     @Autowired
     private ChatMessageRepository repo;
 
+    private static final List<String> BAD_WORDS = List.of(
+            "fdp", "ntm", "pute", "connard", "salope", "enculé", "batard",
+            "tg", "nique", "merde", "pd", "bouffon", "chienne"
+    );
+
     public List<ChatMessage> getAll() {
         return repo.findAll().stream()
                 .sorted((a,b) -> a.getDate().compareTo(b.getDate()))
@@ -25,13 +30,24 @@ public class ChatService {
     public ChatMessage save(String pseudo, String contenu) {
         if (contenu == null || contenu.trim().isEmpty() || contenu.length() > 150)
             throw new IllegalArgumentException("Message invalide");
+
+        String clean = sanitizeMessage(contenu.trim());
+
         ChatMessage msg = new ChatMessage();
         msg.setPseudo(pseudo);
-        msg.setContenu(contenu.trim());
+        msg.setContenu(clean);
         msg.setDate(LocalDateTime.now());
         return repo.save(msg);
     }
 
+    private String sanitizeMessage(String contenu) {
+        String texte = contenu;
+        for (String bad : BAD_WORDS) {
+            String regex = "(?i)\\b" + bad + "\\b"; // insensible à la casse
+            texte = texte.replaceAll(regex, "***");
+        }
+        return texte;
+    }
 
     @DeleteMapping("/clear")
     @PreAuthorize("hasRole('ADMIN')")
@@ -45,4 +61,10 @@ public class ChatService {
         repo.deleteAll();
         System.out.println("[Chat] Vidé automatiquement à " + LocalDateTime.now());
     }
+
+    @PreAuthorize("hasRole('ADMIN')")
+    public void deleteById(Long id) {
+        repo.deleteById(id);
+    }
+
 }
