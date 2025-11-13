@@ -25,12 +25,13 @@ public class SupportController {
     private final UtilisateurRepository utilisateurRepo;
     private final String toEmail;
 
-    // cache simple anti-spam : userId → timestamp dernier envoi
     private final Map<Long, Instant> lastSent = new ConcurrentHashMap<>();
 
-    public SupportController(JavaMailSender mailSender,
-                             UtilisateurRepository utilisateurRepo,
-                             @Value("${app.support.to:evalux.casino@gmail.com}") String toEmail) {
+    public SupportController(
+            JavaMailSender mailSender,
+            UtilisateurRepository utilisateurRepo,
+            @Value("${app.support.to:evalux.casino@gmail.com}") String toEmail
+    ) {
         this.mailSender = mailSender;
         this.utilisateurRepo = utilisateurRepo;
         this.toEmail = toEmail;
@@ -48,30 +49,31 @@ public class SupportController {
 
         Instant now = Instant.now();
         Instant last = lastSent.get(uid);
-        if (last != null && now.isBefore(last.plusSeconds(300))) { // 5 minutes
+        if (last != null && now.isBefore(last.plusSeconds(300))) {
             long remaining = 300 - (now.getEpochSecond() - last.getEpochSecond());
-            return ResponseEntity.badRequest().body(Map.of("error", "Veuillez patienter " + remaining + "s avant de renvoyer un message."));
+            return ResponseEntity.badRequest().body(Map.of("error",
+                    "Veuillez patienter " + remaining + "s avant de renvoyer un message."));
         }
 
-        String nom = body.getOrDefault("nom", "Utilisateur inconnu");
         String email = body.getOrDefault("email", u.getEmail());
         String sujet = body.getOrDefault("sujet", "(sans sujet)");
         String message = body.getOrDefault("message", "(vide)");
 
-        if (nom.length() > 50 || email.length() > 100 || sujet.length() > 100 || message.length() > 1000) {
+        if (email.length() > 100 || sujet.length() > 100 || message.length() > 1000) {
             return ResponseEntity.badRequest().body(Map.of("error", "Le message est trop long."));
         }
 
         try {
             MimeMessage msg = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(msg, false, "UTF-8");
+
             helper.setTo(toEmail);
             helper.setSubject("🛠️ Nouveau message de support — " + sujet);
             helper.setText(
-                "Nom : " + nom + "\n" +
-                "Email : " + email + "\n" +
-                "Utilisateur ID : " + uid + "\n\n" +
-                "Message :\n" + message
+                    "Email utilisateur : " + email + "\n" +
+                            "Utilisateur ID : " + uid + "\n" +
+                            "Pseudo : " + u.getPseudo() + "\n\n" +
+                            "Message :\n" + message
             );
 
             mailSender.send(msg);
