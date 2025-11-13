@@ -7,6 +7,7 @@ import org.example.repo.UtilisateurRepository;
 import org.example.repo.WalletRepository;
 import org.example.repo.TipDailyAggregateRepository;
 
+import org.example.service.WalletSseService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -25,6 +26,7 @@ public class TipController {
     @Autowired private UtilisateurRepository utilisateurRepo;
     @Autowired private WalletRepository walletRepo;
     @Autowired private TipDailyAggregateRepository tipRepo;
+    @Autowired private WalletSseService walletSseService; // ➕ AJOUT
 
     /** Retourne combien un utilisateur peut encore recevoir aujourd’hui */
     @GetMapping("/max-receivable")
@@ -98,6 +100,9 @@ public class TipController {
         // mise à jour aggregate
         agg.setTotalReceived(agg.getTotalReceived() + montant);
         tipRepo.save(agg);
+
+        walletSseService.sendBalanceUpdate(donneur.getEmail(), wDonneur.getSolde());
+        walletSseService.sendBalanceUpdate(receveur.getEmail(), wReceveur.getSolde());
 
         return ResponseEntity.ok(Map.of("success", "Tip envoyé à " + pseudoReceveur));
     }
