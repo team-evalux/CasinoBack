@@ -1,6 +1,7 @@
+// src/main/java/org/example/controller/ChatController.java
 package org.example.controller;
 
-import org.example.model.ChatMessage;
+import org.example.dto.ChatMessage;
 import org.example.model.Utilisateur;
 import org.example.service.ChatService;
 import org.example.service.UtilisateurService;
@@ -23,7 +24,7 @@ public class ChatController {
     private ChatService chatService;
 
     @Autowired
-    private UtilisateurService utilisateurService; // ✅ injection du service utilisateur
+    private UtilisateurService utilisateurService;
 
     @Autowired
     private SimpMessagingTemplate messagingTemplate;
@@ -39,7 +40,6 @@ public class ChatController {
     public ResponseEntity<?> envoyer(@RequestBody Map<String, String> body, Authentication auth) {
         String contenu = body.get("contenu");
 
-        // ✅ récupère le pseudo via le service utilisateur (grâce à l’e-mail de auth)
         String pseudo = "Invité";
         if (auth != null) {
             String email = auth.getName();
@@ -51,7 +51,6 @@ public class ChatController {
 
         try {
             ChatMessage saved = chatService.save(pseudo, contenu);
-            // Envoi d’une notification via WebSocket pour refresh instantané
             messagingTemplate.convertAndSend("/topic/chat-new", Map.of("new", true, "id", saved.getId()));
             return ResponseEntity.ok(saved);
         } catch (IllegalArgumentException e) {
@@ -77,17 +76,4 @@ public class ChatController {
         return ResponseEntity.noContent().build();
     }
 
-    // --- WebSocket : indicateur de saisie (typing) ---
-    @MessageMapping("/chat/typing")
-    public void typing(Map<String, String> payload, Authentication auth) {
-        if (auth == null) return;
-
-        String email = auth.getName();
-        Utilisateur u = utilisateurService.trouverParEmail(email);
-
-        if (u == null || u.getPseudo() == null || u.getPseudo().isBlank()) return;
-
-        String pseudo = u.getPseudo();
-        messagingTemplate.convertAndSend("/topic/chat-typing", Map.of("pseudo", pseudo));
-    }
 }
