@@ -1,6 +1,8 @@
 // src/main/java/org/example/controller/ChatController.java
 package org.example.controller;
 
+import org.example.dto.ChatEvent;
+import org.example.dto.ChatInputMessage;
 import org.example.dto.ChatMessage;
 import org.example.model.Utilisateur;
 import org.example.service.ChatService;
@@ -13,6 +15,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.security.Principal;
 import java.util.List;
 import java.util.Map;
 
@@ -29,17 +32,60 @@ public class ChatController {
     @Autowired
     private SimpMessagingTemplate messagingTemplate;
 
-    // --- Récupération de tous les messages ---
+    // ---------- REST : historique ----------
+
     @GetMapping
     public List<ChatMessage> list() {
         return chatService.getAll();
     }
 
-    // --- Envoi d’un message ---
     @PostMapping
-    public ResponseEntity<?> envoyer(@RequestBody Map<String, String> body, Authentication auth) {
+    public ResponseEntity<?> envoyer(@RequestBody Map<String, String> body,
+                                     Authentication auth) {
         String contenu = body.get("contenu");
+        String pseudo = resolvePseudo(auth);
 
+        try {
+            ChatMessage saved = chatService.save(pseudo, contenu);
+            broadcastMessage(saved); // 🔥 push WebSocket
+            return ResponseEntity.ok(saved);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<?> deleteMessage(@PathVariable Long id) {
+        chatService.deleteById(id);
+        broadcastDelete(id); // 🔥 push WebSocket
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/clear")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<?> clear() {
+        chatService.clear();
+        broadcastClear(); // 🔥 push WebSocket
+        return ResponseEntity.noContent().build();
+    }
+
+    // ---------- STOMP : envoi via /app/chat.send ----------
+
+    @MessageMapping("/chat.send")
+    public void envoyerWs(ChatInputMessage payload, Principal principal) {
+        String pseudo = resolvePseudoFromPrincipal(principal);
+        try {
+            ChatMessage saved = chatService.save(pseudo, payload.getContenu());
+            broadcastMessage(saved);
+        } catch (IllegalArgumentException e) {
+            // si tu veux tu peux gérer les erreurs vers /user/queue/errors
+        }
+    }
+
+    // ---------- Utils ----------
+
+    private String resolvePseudo(Authentication auth) {
         String pseudo = "Invité";
         if (auth != null) {
             String email = auth.getName();
@@ -48,32 +94,33 @@ public class ChatController {
                 pseudo = u.getPseudo();
             }
         }
+        return pseudo;
+    }
 
-        try {
-            ChatMessage saved = chatService.save(pseudo, contenu);
-            messagingTemplate.convertAndSend("/topic/chat-new", Map.of("new", true, "id", saved.getId()));
-            return ResponseEntity.ok(saved);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+    private String resolvePseudoFromPrincipal(Principal principal) {
+        if (principal instanceof Authentication auth) {
+            return resolvePseudo(auth);
         }
+        return "Invité";
     }
 
-    // --- Supprimer 1 message (ADMIN uniquement) ---
-    @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<?> deleteMessage(@PathVariable Long id) {
-        chatService.deleteById(id);
-        messagingTemplate.convertAndSend("/topic/chat-new", Map.of("deleted", id));
-        return ResponseEntity.noContent().build();
+    private void broadcastMessage(ChatMessage saved) {
+        ChatEvent event = new ChatEvent();
+        event.setType(ChatEvent.Type.MESSAGE);
+        event.setMessage(saved);
+        messagingTemplate.convertAndSend("/topic/chat", event);
     }
 
-    // --- Vider tout le chat (ADMIN uniquement) ---
-    @DeleteMapping("/clear")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<?> clear() {
-        chatService.clear();
-        messagingTemplate.convertAndSend("/topic/chat-new", Map.of("cleared", true));
-        return ResponseEntity.noContent().build();
+    private void broadcastDelete(Long id) {
+        ChatEvent event = new ChatEvent();
+        event.setType(ChatEvent.Type.DELETE);
+        event.setId(id);
+        messagingTemplate.convertAndSend("/topic/chat", event);
     }
 
+    private void broadcastClear() {
+        ChatEvent event = new ChatEvent();
+        event.setType(ChatEvent.Type.CLEAR);
+        messagingTemplate.convertAndSend("/topic/chat", event);
+    }
 }

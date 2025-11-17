@@ -24,6 +24,4 @@ public class Wallet {
     @Column(nullable = false)
     private Long solde = 0L; // crédits en entier
 
-    @Version
-    private Integer version;
 }
