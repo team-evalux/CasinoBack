@@ -14,17 +14,18 @@ public interface WalletRepository extends JpaRepository<Wallet, Long> {
     Optional<Wallet> findByUtilisateur(Utilisateur utilisateur);
 
     @Transactional
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update Wallet w set w.solde = w.solde + :amount where w.utilisateur = :u")
     int incrementSolde(@Param("u") Utilisateur utilisateur, @Param("amount") long amount);
 
     @Transactional
-    @Modifying
-    @Query("update Wallet w set w.solde = w.solde - :amount where w.utilisateur = :u and w.solde >= :amount")
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update Wallet w set w.solde = w.solde - :amount " +
+            "where w.utilisateur = :u and w.solde >= :amount")
     int decrementSoldeIfEnough(@Param("u") Utilisateur utilisateur, @Param("amount") long amount);
-
 
     @Modifying
     @Query("delete from Wallet w where w.utilisateur = :u")
     int deleteByUtilisateur(@Param("u") Utilisateur u);
 }
+

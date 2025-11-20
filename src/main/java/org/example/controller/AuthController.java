@@ -84,8 +84,8 @@ public class AuthController {
     // --- Login classique ---
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody AuthRequest req){
-        Utilisateur u = utilisateurService.trouverParEmail(req.email);
-        if(u==null || !utilisateurService.verifierMotDePasse(u, req.motDePasse)){
+        Utilisateur u = utilisateurService.trouverParEmail(req.getEmail());
+        if(u==null || !utilisateurService.verifierMotDePasse(u, req.getMotDePasse())){
             return ResponseEntity.status(401).body("Identifiants invalides");
         }
         String token = jwtUtil.genererToken(u.getEmail());

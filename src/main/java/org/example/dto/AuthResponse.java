@@ -1,15 +1,16 @@
+// src/main/java/org/example/dto/AuthResponse.java
 package org.example.dto;
 
-public class AuthResponse {
-    public String token;
-    public String email;
-    public String pseudo;
-    public String role;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
 
-    public AuthResponse(String token, String email, String pseudo, String role) {
-        this.token = token;
-        this.email = email;
-        this.pseudo = pseudo;
-        this.role = role;
-    }
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class AuthResponse {
+    private String token;
+    private String email;
+    private String pseudo;
+    private String role;
 }

@@ -103,18 +103,18 @@ public class MinesService {
         Round r = mustGetOwnedActive(u, sessionId);
         int i = clampIndex(index);
 
-        if (r.safes.contains(i) || r.bombs.contains(i)) {
-            boolean bomb = r.bombs.contains(i);
-            return buildPickResult(r, i, bomb, bomb);
+        if (r.safes.contains(i)) {
+            return buildPickResult(r, i, false, false);
         }
 
         if (r.bombs.contains(i)) {
-            // 💣 Bombe → fin immédiate + suppression complète
+            // Bombe cliquée (même si déjà cliquée avant)
             r.active = false;
             rounds.remove(r.id);
             sessionByUser.remove(u.getEmail());
             return buildPickResult(r, i, true, true);
-        } else {
+
+    } else {
             // safe
             r.safes.add(i);
             boolean finished = r.safes.size() == (GRID - r.mines);
